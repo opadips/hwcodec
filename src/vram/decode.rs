@@ -1,10 +1,13 @@
 use crate::{
     common::{DataFormat::*, Driver::*},
     ffmpeg::init_av_log,
-    vram::{amf, ffmpeg, inner::DecodeCalls, mfx, nv, DecodeContext},
+    vram::{amf, ffmpeg, inner::DecodeCalls, nv, DecodeContext},
 };
 use log::trace;
 use std::ffi::c_void;
+
+#[cfg(feature = "intel-mfx")]
+use crate::vram::mfx;
 
 pub struct Decoder {
     calls: DecodeCalls,
@@ -30,7 +33,10 @@ impl Decoder {
         let calls = match ctx.driver {
             NV => nv::decode_calls(),
             AMF => amf::decode_calls(),
+            #[cfg(feature = "intel-mfx")]
             MFX => mfx::decode_calls(),
+            #[cfg(not(feature = "intel-mfx"))]
+            MFX => return Err(()),
             FFMPEG => ffmpeg::decode_calls(),
         };
         unsafe {
@@ -125,6 +131,7 @@ pub fn available() -> Vec<DecodeContext> {
             .map(|n| (AMF, n))
             .collect(),
     );
+    #[cfg(feature = "intel-mfx")]
     codecs.append(
         &mut mfx::possible_support_decoders()
             .drain(..)
@@ -157,7 +164,10 @@ pub fn available() -> Vec<DecodeContext> {
         let test = match input.driver {
             NV => nv::decode_calls().test,
             AMF => amf::decode_calls().test,
+            #[cfg(feature = "intel-mfx")]
             MFX => mfx::decode_calls().test,
+            #[cfg(not(feature = "intel-mfx"))]
+            MFX => unsafe { std::mem::zeroed() },
             FFMPEG => ffmpeg::decode_calls().test,
         };
 

@@ -154,11 +154,21 @@ mod ffmpeg {
             )
         );
         {
-            let mut static_libs = vec!["avcodec", "avutil", "avformat"];
-            // Intel Quick Sync (libmfx/QSV) is x86/x64-only; FFmpeg is built without
-            // --enable-libmfx on arm64 (see res/vcpkg/ffmpeg/portfile.cmake), so don't link it there.
+            // avswresample is the pkg-config name; swresample is the lib file name.
+            // Both are provided by vcpkg's ffmpeg port and are required by the mux
+            // module (Opus resampler) and any decoder using swr_* functions.
+            let mut static_libs = vec!["avcodec", "avutil", "avformat", "swresample"];
+            // Intel Quick Sync (QSV) dispatcher: vcpkg installs it as vpl.lib
+            // (oneVPL). Needed for FFmpeg's QSV hwcontext. Also link libmfx
+            // (intel-media-sdk) if available as a fallback.
             if target_os == "windows" && (target_arch == "x64" || target_arch == "x86") {
-                static_libs.push("libmfx");
+                let vpl_path = path.join("lib").join("vpl.lib");
+                let mfx_path = path.join("lib").join("libmfx.lib");
+                if vpl_path.exists() {
+                    static_libs.push("vpl");
+                } else if mfx_path.exists() {
+                    static_libs.push("libmfx");
+                }
             }
             static_libs
                 .iter()
@@ -176,7 +186,12 @@ mod ffmpeg {
         let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
         let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
         let dyn_libs: Vec<&str> = if target_os == "windows" {
-            ["User32", "bcrypt", "ole32", "advapi32"].to_vec()
+            // strmiids: DirectShow COM interface GUIDs (IID_ICodecAPI, etc.)
+            // mfplat:   Windows Media Foundation platform (MF_MT_* attributes, MFCreateMediaType)
+            [
+                "User32", "bcrypt", "ole32", "advapi32", "strmiids", "mfplat", "mfuuid",
+            ]
+            .to_vec()
         } else if target_os == "linux" {
             let mut v = ["drm", "X11", "stdc++"].to_vec();
             if target_arch == "x86_64" {
@@ -286,7 +301,23 @@ mod sdk {
     pub(crate) fn build_sdk(builder: &mut Build) {
         build_amf(builder);
         build_nv(builder);
-        build_mfx(builder);
+        // MFX/QSV code requires the classic intel-media-sdk (libmfx.lib).
+        // vpl.lib (oneVPL from ffmpeg vcpkg port) does NOT export the
+        // deprecated MFXDoWork / MFXVideoCORE_SetBufferAllocator symbols
+        // that mfx_encode/mfx_decode call. vpl.lib is still linked for
+        // FFmpeg's QSV hwcontext, but hwcodec's own MFX code needs the
+        // old SDK. Both the feature flag AND lib presence are checked.
+        #[cfg(feature = "intel-mfx")]
+        {
+            let vcpkg_root = std::env::var("VCPKG_ROOT").unwrap_or_default();
+            let base = std::path::PathBuf::from(&vcpkg_root)
+                .join("installed")
+                .join("x64-windows-static")
+                .join("lib");
+            if base.join("libmfx.lib").exists() {
+                build_mfx(builder);
+            }
+        }
     }
 
     fn build_nv(builder: &mut Build) {

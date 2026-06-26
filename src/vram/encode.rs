@@ -2,9 +2,11 @@ use crate::{
     common::Driver::*,
     ffmpeg::init_av_log,
     vram::{
-        amf, ffmpeg, inner::EncodeCalls, mfx, nv, DynamicContext, EncodeContext, FeatureContext,
+        amf, ffmpeg, inner::EncodeCalls, nv, DynamicContext, EncodeContext, FeatureContext,
     },
 };
+#[cfg(feature = "intel-mfx")]
+use crate::vram::mfx;
 use log::trace;
 use std::{
     fmt::Display, os::raw::{c_int, c_void}, slice::from_raw_parts
@@ -29,7 +31,10 @@ impl Encoder {
         let calls = match ctx.f.driver {
             NV => nv::encode_calls(),
             AMF => amf::encode_calls(),
+            #[cfg(feature = "intel-mfx")]
             MFX => mfx::encode_calls(),
+            #[cfg(not(feature = "intel-mfx"))]
+            MFX => return Err(()),
             FFMPEG => ffmpeg::encode_calls(),
         };
         unsafe {
@@ -148,6 +153,7 @@ pub fn available(d: DynamicContext) -> Vec<FeatureContext> {
             .map(|n| (AMF, n))
             .collect(),
     );
+    #[cfg(feature = "intel-mfx")]
     natives.append(
         &mut mfx::possible_support_encoders()
             .drain(..)
@@ -179,7 +185,10 @@ pub fn available(d: DynamicContext) -> Vec<FeatureContext> {
         let test = match input.f.driver {
             NV => nv::encode_calls().test,
             AMF => amf::encode_calls().test,
+            #[cfg(feature = "intel-mfx")]
             MFX => mfx::encode_calls().test,
+            #[cfg(not(feature = "intel-mfx"))]
+            MFX => unsafe { std::mem::zeroed() },
             FFMPEG => ffmpeg::encode_calls().test,
         };
 

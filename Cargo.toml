@@ -8,6 +8,11 @@ edition = "2021"
 [features]
 default = []
 vram = []
+# intel-mfx: enable Intel Quick Sync Video (QSV) via Media SDK.
+# Requires libmfx.lib from vcpkg (install intel-media-sdk:x64-windows-static).
+# Not enabled by default because vpl.lib (oneVPL) does not export the
+# deprecated MFXDoWork / MFXVideoCORE_SetBufferAllocator symbols.
+intel-mfx = []
 
 [dependencies]
 log = "0.4"

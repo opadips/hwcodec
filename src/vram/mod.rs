@@ -3,6 +3,7 @@ pub mod decode;
 pub mod encode;
 pub(crate) mod ffmpeg;
 mod inner;
+#[cfg(feature = "intel-mfx")]
 pub(crate) mod mfx;
 pub(crate) mod nv;
 

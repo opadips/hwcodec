@@ -32,12 +32,20 @@ pub(crate) fn supported_gpu(_encode: bool) -> (bool, bool, bool) {
         #[cfg(windows)]
         {
             #[cfg(feature = "vram")]
-            return (
-                _encode && crate::vram::nv::nv_encode_driver_support() == 0
-                    || !_encode && crate::vram::nv::nv_decode_driver_support() == 0,
-                crate::vram::amf::amf_driver_support() == 0,
-                crate::vram::mfx::mfx_driver_support() == 0,
-            );
+            return {
+                let mfx = {
+                    #[cfg(feature = "intel-mfx")]
+                    { crate::vram::mfx::mfx_driver_support() == 0 }
+                    #[cfg(not(feature = "intel-mfx"))]
+                    { false }
+                };
+                (
+                    _encode && crate::vram::nv::nv_encode_driver_support() == 0
+                        || !_encode && crate::vram::nv::nv_decode_driver_support() == 0,
+                    crate::vram::amf::amf_driver_support() == 0,
+                    mfx,
+                )
+            };
             #[cfg(not(feature = "vram"))]
             return (true, true, true);
         }
