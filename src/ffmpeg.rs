@@ -53,7 +53,20 @@ pub extern "C" fn hwcodec_av_log_callback(level: i32, message: *const std::os::r
 pub(crate) fn init_av_log() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| unsafe {
-        av_log_set_level(AV_LOG_ERROR as i32);
+        // Was AV_LOG_ERROR. That filters inside libavutil, *before* the
+        // callback above ever runs — so a hwaccel that fails to initialize
+        // (e.g. D3D11VA device/feature negotiation) had its actual reason
+        // silently discarded, leaving nothing in the client's log beyond
+        // "no hardware decoder found". FFmpeg's own hwaccel setup path
+        // logs most of that detail at WARNING, so this is the lowest level
+        // that reliably captures it without turning on frame-by-frame
+        // chatter (VERBOSE/DEBUG/TRACE do fire per-frame in the decode
+        // hot path and would add real per-frame log I/O — see
+        // ffmpeg_ram::decode::available_decoders() for a temporary,
+        // narrowly-scoped bump to VERBOSE around just the one-time
+        // hardware-candidate probe, where that extra detail is worth the
+        // cost because it only runs once at startup).
+        av_log_set_level(AV_LOG_WARNING as i32);
         hwcodec_set_av_log_callback();
     });
 }

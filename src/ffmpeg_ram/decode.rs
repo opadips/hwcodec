@@ -1,7 +1,7 @@
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use super::Priority;
 use crate::common::TEST_TIMEOUT_MS;
-use crate::ffmpeg::{init_av_log, AVHWDeviceType::*};
+use crate::ffmpeg::{av_log_set_level, init_av_log, AVHWDeviceType::*, AV_LOG_VERBOSE, AV_LOG_WARNING};
 
 use crate::{
     common::DataFormat::*,
@@ -256,6 +256,16 @@ impl Decoder {
         let buf264 = &crate::common::DATA_H264_720P[..];
         let buf265 = &crate::common::DATA_H265_720P[..];
 
+        // This loop is the only place a hwaccel candidate (e.g. D3D11VA) is
+        // actually probed — a real decode() call against a canned buffer,
+        // not just device creation. It runs once, at startup, so the extra
+        // verbosity here costs nothing in steady state (unlike leaving it
+        // on permanently, which would add per-frame FFmpeg log I/O to the
+        // live decode path). Restored to the normal WARNING baseline (see
+        // init_av_log) once probing is done, whether or not a hardware
+        // candidate was found.
+        unsafe { av_log_set_level(AV_LOG_VERBOSE as i32) };
+
         for codec in codecs {
             // Skip if this format already exists in results
             if res
@@ -314,6 +324,11 @@ impl Decoder {
                 }
             }
         }
+
+        // Probe done — drop back to the quiet steady-state level so live
+        // decode() calls on whichever candidate won don't pay per-frame
+        // FFmpeg log-callback overhead.
+        unsafe { av_log_set_level(AV_LOG_WARNING as i32) };
 
         let soft = CodecInfo::soft();
         if let Some(c) = soft.h264 {
