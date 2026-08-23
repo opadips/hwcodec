@@ -173,36 +173,27 @@ public:
   }
 
 private:
-  int do_decode(const void *obj) {
-    int ret;
+  // Pulls every currently-available decoded frame out of the decoder via
+  // avcodec_receive_frame(), invoking callback_ for each one and setting
+  // decoded=true if at least one came out. AVERROR(EAGAIN)/AVERROR_EOF
+  // here just mean "nothing more is ready right now" -- that is not a
+  // failure, it's the normal way this loop ends. Returns false only for
+  // a genuine decode error (bad hw frame, transfer failure, or anything
+  // other than EAGAIN/EOF from avcodec_receive_frame).
+  bool drain_available_frames(const void *obj, bool &decoded) {
     AVFrame *tmp_frame = NULL;
-    bool decoded = false;
-
-    ret = avcodec_send_packet(c_, pkt_);
-    if (ret < 0) {
-      LOG_ERROR(std::string("avcodec_send_packet failed, ret = ") + av_err2str(ret));
-      return ret;
-    }
-    auto start = util::now();
-    while (ret >= 0 && util::elapsed_ms(start) < ENCODE_TIMEOUT_MS) {
-      if ((ret = avcodec_receive_frame(c_, frame_)) != 0) {
-        if (ret != AVERROR(EAGAIN)) {
-          LOG_ERROR(std::string("avcodec_receive_frame failed, ret = ") + av_err2str(ret));
-        }
-        goto _exit;
-      }
-
+    int ret;
+    while ((ret = avcodec_receive_frame(c_, frame_)) == 0) {
       if (hwaccel_) {
         if (!frame_->hw_frames_ctx) {
           LOG_ERROR(std::string("hw_frames_ctx is NULL"));
-          goto _exit;
+          return false;
         }
         if ((ret = av_hwframe_transfer_data(sw_frame_, frame_, 0)) < 0) {
           LOG_ERROR(std::string("av_hwframe_transfer_data failed, ret = ") +
                     av_err2str(ret));
-          goto _exit;
+          return false;
         }
-
         tmp_frame = sw_frame_;
       } else {
         tmp_frame = frame_;
@@ -212,13 +203,82 @@ private:
       out_++;
       LOG_DEBUG(std::string("delay DO: in:") + in_ + " out:" + out_);
 #endif
-      // AV_FRAME_FLAG_KEY replaces the removed key_frame field (FFmpeg >= 7.0)
+      // FF_API_FRAME_KEY is FFmpeg's standard deprecation-guard
+      // convention: it's 1 while the *old* AVFrame::key_frame field
+      // still exists (deprecated but present), and 0 once that field
+      // has actually been removed -- at which point AV_FRAME_FLAG_KEY
+      // is the only way to ask. The two branches below were swapped in
+      // the original file (using the new flag while the old field was
+      // still available, and falling back to the old field -- which by
+      // definition no longer exists -- once FF_API_FRAME_KEY says it's
+      // gone). That compiles fine against any FFmpeg build old enough
+      // to still have key_frame, and fails outright (`'key_frame': is
+      // not a member of 'AVFrame'`) the moment it's built against one
+      // that actually removed it (FFmpeg 7.0+).
+#if FF_API_FRAME_KEY
+      int key_frame = frame_->key_frame;
+#else
       int key_frame = frame_->flags & AV_FRAME_FLAG_KEY;
-
+#endif
       callback_(obj, tmp_frame->width, tmp_frame->height,
                 (AVPixelFormat)tmp_frame->format, tmp_frame->linesize,
                 tmp_frame->data, key_frame);
     }
+    if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+      LOG_ERROR(std::string("avcodec_receive_frame failed, ret = ") + av_err2str(ret));
+      return false;
+    }
+    return true;
+  }
+
+  int do_decode(const void *obj) {
+    bool decoded = false;
+    auto start = util::now();
+
+    // avcodec_send_packet() can legitimately return AVERROR(EAGAIN).
+    // Per its own documentation (avcodec.h): "input is not accepted in
+    // the current state - user must read output with
+    // avcodec_receive_frame() (once all output is read, the packet
+    // should be resent, and the call will not fail with EAGAIN)." That
+    // is normal backpressure, not a decode error -- it just means
+    // avcodec_receive_frame() hasn't been called enough yet to make room
+    // for this packet. The previous version of this function treated
+    // *any* ret < 0 from send_packet, including this specific documented
+    // and retriable case, as an immediate hard failure with no attempt
+    // to drain and resend. That only ever bites when the caller can't
+    // keep avcodec_receive_frame() fully drained between decode() calls
+    // -- e.g. a software-decode fallback path that's a bit slower than
+    // the incoming frame rate -- which silently turned ordinary,
+    // recoverable backpressure into reported decode failures.
+    int send_ret;
+    for (;;) {
+      send_ret = avcodec_send_packet(c_, pkt_);
+      if (send_ret == 0) {
+        break; // accepted -- fall through to the unconditional drain below
+      }
+      if (send_ret != AVERROR(EAGAIN)) {
+        LOG_ERROR(std::string("avcodec_send_packet failed, ret = ") + av_err2str(send_ret));
+        goto _exit;
+      }
+      // EAGAIN: drain whatever's ready, then retry sending this same
+      // packet, bounded by the same ENCODE_TIMEOUT_MS budget the
+      // original receive loop used.
+      if (!drain_available_frames(obj, decoded)) {
+        goto _exit; // drain_available_frames already logged the real error
+      }
+      if (util::elapsed_ms(start) >= ENCODE_TIMEOUT_MS) {
+        LOG_ERROR(std::string("avcodec_send_packet kept returning EAGAIN past the ") +
+                  std::to_string(ENCODE_TIMEOUT_MS) + "ms budget");
+        goto _exit;
+      }
+    }
+
+    // Packet accepted -- collect whatever it produced. With
+    // AV_CODEC_FLAG_LOW_DELAY and max_b_frames=0 (see set_av_codec_ctx)
+    // this is normally exactly one frame, but draining fully here is
+    // still correct and matches ffmpeg's own decode examples.
+    drain_available_frames(obj, decoded);
+
   _exit:
     av_packet_unref(pkt_);
     return decoded ? 0 : -1;

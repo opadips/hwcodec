@@ -156,6 +156,50 @@ public:
 
   AMF_RESULT destroy() {
     if (AMFEncoder_) {
+      // Terminate() used to run with no drain step first. If the GPU
+      // still has outstanding work from an earlier SubmitInput() whose
+      // matching QueryOutput() result was never collected -- plausible
+      // right after a forced recreate, since the caller can ask for one
+      // between one encode() call's SubmitInput and its QueryOutput --
+      // Terminate() tears down GPU-side resources the driver may still
+      // be actively writing into.
+      //
+      // This is exactly the bug class this project's own README already
+      // documents, just for a different vendor: an NVIDIA/CUDA context
+      // destroyed while GPU work was still outstanding caused driver-level
+      // system freezes and black screens
+      // (https://forums.developer.nvidia.com/t/cuctxdestroy-causing-system-freeze-and-black-screen/290542/1),
+      // severe enough that this project disabled CUDA decode outright
+      // rather than fix the teardown ordering. Nothing here suggests AMD's
+      // AMF was ever given the equivalent audit. AMF exposes the
+      // documented way to avoid it: Drain() the component (stop accepting
+      // new input, flush what's already queued) and pump QueryOutput()
+      // until it reports AMF_EOF -- i.e. until the GPU genuinely has
+      // nothing left in flight for this component -- before Terminate()
+      // runs. Bounded by a timeout so a encoder that's already wedged for
+      // some other reason can't hang shutdown forever.
+      AMF_RESULT drain_res = AMFEncoder_->Drain();
+      if (drain_res == AMF_OK) {
+        auto start = util::now();
+        for (;;) {
+          amf::AMFDataPtr data = NULL;
+          AMF_RESULT q = AMFEncoder_->QueryOutput(&data);
+          data = NULL;
+          if (q == AMF_EOF) {
+            break;
+          }
+          if (util::elapsed_ms(start) > 500) {
+            LOG_ERROR(std::string("AMF encoder Drain() did not reach "
+                                   "AMF_EOF within 500ms; terminating "
+                                   "anyway"));
+            break;
+          }
+        }
+      } else {
+        LOG_ERROR(std::string("AMF encoder Drain() failed, result code: ") +
+                   std::to_string(int(drain_res)) +
+                   "; terminating without draining");
+      }
       AMFEncoder_->Terminate();
       AMFEncoder_ = NULL;
     }

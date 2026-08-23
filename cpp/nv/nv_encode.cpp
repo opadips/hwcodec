@@ -204,6 +204,50 @@ public:
 
   void destroy() {
     if (pEnc_) {
+      // NvEncoder.h's own doc comment on EndEncode(), verbatim: "The
+      // encoder might be queuing frames for B picture encoding or
+      // lookahead; the application must call EndEncode() to get all the
+      // queued encoded frames from the encoder. The application must call
+      // this function before destroying an encoder session." This used to
+      // skip straight to DestroyEncoder(), discarding whatever was still
+      // queued inside NVENC's own pipeline at that instant.
+      //
+      // In this project that queue is normally empty in steady state (B-
+      // frames and lookahead are both off -- see setup_h264/setup_hevc
+      // and frameIntervalP=1 in create() -- so encode() ordinarily gets
+      // its result back in the same call it submits), but destroy() can
+      // run at any point relative to encode(), including right after a
+      // submit whose result hasn't come back yet. SarvDesk recreates this
+      // encoder on every client keyframe request (see peer/lan.rs), so
+      // that moment comes up often. Whatever was still in flight at that
+      // exact instant was silently lost -- no error, nothing in any log
+      // -- and a client whose reference chain needed that specific frame
+      // would see only the downstream decoder-level symptom of a picture
+      // simply vanishing (e.g. "Could not find ref with POC N"), with
+      // nothing on the wire pointing back to this as the cause.
+      //
+      // The retrieved packets are deliberately discarded rather than
+      // forwarded to the client: this destroy()/create() cycle exists
+      // specifically to hand the client a brand new, self-contained IDR
+      // next, so anything still queued from the outgoing encoder is
+      // already obsolete, and forwarding it here would risk
+      // reintroducing this same class of bug the other way around
+      // (stale-generation frames delivered after the new generation's
+      // IDR). The point isn't to recover the frame -- it's to give NVENC
+      // the drain call its own header says destruction requires, so
+      // nothing is torn down mid-flight.
+      try {
+        std::vector<NvPacket> flushed;
+        pEnc_->EndEncode(flushed);
+      } catch (const std::exception &e) {
+        // Matches this file's existing catch style elsewhere (see
+        // nv_destroy_encoder, create(), etc). An encoder too broken for
+        // EndEncode() to succeed isn't one EndEncode could have
+        // meaningfully flushed anyway -- fall through to
+        // DestroyEncoder() regardless, rather than leaking pEnc_ by
+        // letting this exception skip the rest of destroy().
+        LOG_ERROR(std::string("EndEncode before destroy failed: ") + e.what());
+      }
       pEnc_->DestroyEncoder();
       delete pEnc_;
       pEnc_ = nullptr;
