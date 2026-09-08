@@ -726,4 +726,12 @@ int mfx_set_framerate(void *encoder, int32_t framerate) {
   LOG_WARN("not support change framerate");
   return -1;
 }
+
+int mfx_set_force_idr(void *encoder) {
+  // Not wired up for QSV. Returning failure is meaningful, not a
+  // silent no-op: callers fall back to rebuilding the encoder, which
+  // is exactly what every backend did before force-IDR existed.
+  LOG_WARN("not support force idr");
+  return -1;
+}
 }

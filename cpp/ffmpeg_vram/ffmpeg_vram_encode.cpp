@@ -76,6 +76,11 @@ public:
   int32_t kbs_;
   int32_t framerate_;
   int32_t gop_;
+  // Set by ffmpeg_vram_set_force_idr, consumed by the next do_encode.
+  // Lets a caller get a fresh IDR on demand without destroying and
+  // rebuilding the encoder (which costs a full re-probe and hundreds of
+  // milliseconds of dropped capture).
+  bool force_idr_ = false;
 
   const int align_ = 0;
   const bool full_range_ = false;
@@ -232,6 +237,43 @@ public:
   }
 
   void destroy() {
+    if (c_ && avcodec_is_open(c_)) {
+      // avcodec_free_context() used to run directly here, with no flush
+      // step first. FFmpeg's own documented shutdown sequence for an
+      // encoder --send a NULL frame to signal end-of-stream, then drain
+      // every packet still buffered inside the encoder via
+      // avcodec_receive_packet() until it returns AVERROR_EOF -- was
+      // skipped entirely. With max_b_frames=0 and this project's own
+      // encode()/do_encode() already draining fully after every send
+      // (see do_encode() above) there is normally nothing left queued in
+      // steady state, but destroy() can run at any point relative to
+      // do_encode(), including immediately after a send that hit EAGAIN
+      // (see do_encode()'s own retry loop) or simply whenever this
+      // project's "Recreating video encoder" forced-keyframe path
+      // decides to tear this encoder down (see peer/lan.rs). Whatever
+      // the hardware encoder still had buffered internally at that exact
+      // instant was silently discarded by freeing the context out from
+      // under it -- on a real Intel/QSV machine, a field log showed
+      // exactly this sequence (a burst of forced recreations under load)
+      // immediately followed by the whole agent process going silent.
+      //
+      // The flushed packets are deliberately discarded rather than
+      // forwarded to the client: this destroy()/recreate cycle exists
+      // specifically to hand the client a brand new, self-contained IDR
+      // next, so anything still buffered from the outgoing encoder
+      // generation is already obsolete.
+      int send_ret = avcodec_send_frame(c_, nullptr);
+      if (send_ret == 0 || send_ret == AVERROR_EOF) {
+        bool discarded_encoded = false;
+        drain_available_packets(nullptr, nullptr, discarded_encoded);
+      } else if (send_ret != AVERROR(EAGAIN)) {
+        // Genuinely can't flush (e.g. the context was never successfully
+        // opened, or the device is already gone) -- nothing more to do
+        // here, fall through to freeing the context regardless.
+        LOG_ERROR(std::string("avcodec_send_frame(NULL) for flush failed, ret = ") +
+                  av_err2str(send_ret));
+      }
+    }
     if (pkt_)
       av_packet_free(&pkt_);
     if (frame_)
@@ -311,34 +353,108 @@ private:
     }
     return false;
   }
-  int do_encode(EncodeCallback callback, const void *obj, int64_t ms) {
+  // Pulls every currently-available encoded packet out via
+  // avcodec_receive_packet(), invoking callback_ for each one and setting
+  // encoded=true if at least one came out. AVERROR(EAGAIN)/AVERROR_EOF
+  // here just mean "nothing more is ready right now" -- not a failure,
+  // just the normal way this loop ends. Returns false only for a genuine
+  // encode error. Always unrefs pkt_ before returning, regardless of
+  // outcome -- matching the original code's own unconditional
+  // av_packet_unref(pkt_) at its single _exit: label, since
+  // avcodec_receive_packet() only unrefs pkt_ itself at the *start* of
+  // each call, not after the last one before this function hands control
+  // back.
+  bool drain_available_packets(EncodeCallback callback, const void *obj,
+                                bool &encoded) {
     int ret;
-    bool encoded = false;
-    frame_->pts = ms;
-    if ((ret = avcodec_send_frame(c_, frame_)) < 0) {
-      LOG_ERROR(std::string("avcodec_send_frame failed, ret = ") + av_err2str(ret));
-      return ret;
-    }
-
-    auto start = util::now();
-    while (ret >= 0 && util::elapsed_ms(start) < ENCODE_TIMEOUT_MS) {
-      if ((ret = avcodec_receive_packet(c_, pkt_)) < 0) {
-        if (ret != AVERROR(EAGAIN)) {
-          LOG_ERROR(std::string("avcodec_receive_packet failed, ret = ") + av_err2str(ret));
-        }
-        goto _exit;
-      }
+    while ((ret = avcodec_receive_packet(c_, pkt_)) == 0) {
       if (!pkt_->data || !pkt_->size) {
         LOG_ERROR(std::string("avcodec_receive_packet failed, pkt size is 0"));
-        goto _exit;
+        av_packet_unref(pkt_);
+        return false;
       }
       encoded = true;
       if (callback)
         callback(pkt_->data, pkt_->size, pkt_->flags & AV_PKT_FLAG_KEY, obj,
                  pkt_->pts);
     }
-  _exit:
     av_packet_unref(pkt_);
+    if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+      LOG_ERROR(std::string("avcodec_receive_packet failed, ret = ") + av_err2str(ret));
+      return false;
+    }
+    return true;
+  }
+
+  int do_encode(EncodeCallback callback, const void *obj, int64_t ms) {
+    bool encoded = false;
+    frame_->pts = ms;
+    // FFmpeg's standard force-keyframe contract: an input frame tagged
+    // AV_PICTURE_TYPE_I makes the encoder emit an IDR (with fresh
+    // SPS/PPS/VPS) for it. Honoured by the hardware wrappers this file
+    // drives -- amfenc maps it to FORCE_PICTURE_TYPE_IDR, nvenc to
+    // NV_ENC_PIC_FLAG_FORCEIDR, qsv to MFX_FRAMETYPE_IDR. Cleared
+    // immediately so exactly one frame is forced per request; AV_PICTURE
+    // _TYPE_NONE is the "encoder decides" default the rest of the time.
+    //
+    // Set once, before the send loop below rather than inside it: an
+    // EAGAIN retry re-sends this same frame, and the tag has to survive
+    // that or the forced keyframe would be lost exactly when the
+    // encoder is under the backpressure that made it necessary.
+    frame_->pict_type = force_idr_ ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
+    force_idr_ = false;
+    auto start = util::now();
+
+    // avcodec_send_frame() can legitimately return AVERROR(EAGAIN): per
+    // its own documentation (avcodec.h), this means "input is not
+    // accepted in the current state - user must read output with
+    // avcodec_receive_packet() (once all output is read, the packet
+    // should be resent, and the call will not fail with EAGAIN)." That's
+    // normal backpressure, not an encode error -- the same category of
+    // bug already fixed on the decode side of this project
+    // (ffmpeg_ram_decode.cpp's do_decode()), just here on the encode
+    // side, in a file shared across every vendor whose device selection
+    // picks the FFmpeg driver rather than a vendor-native SDK path (not
+    // AMD- or NVIDIA- or Intel-specific). The previous version of this
+    // function treated *any* ret < 0 from send_frame, including this
+    // specific documented and retriable case, as an immediate hard
+    // failure with no attempt to drain and resend -- which only bites
+    // when the caller can't keep avcodec_receive_packet() fully drained
+    // between calls, e.g. right after this project's own
+    // "Recreating video encoder" forced-keyframe path fires repeatedly
+    // in a burst (see peer/lan.rs's RECREATE_COOLDOWN) -- exactly the
+    // condition a field log showed immediately preceding a silent agent
+    // process death on real Intel/QSV hardware.
+    int send_ret;
+    for (;;) {
+      send_ret = avcodec_send_frame(c_, frame_);
+      if (send_ret == 0) {
+        break; // accepted -- fall through to the unconditional drain below
+      }
+      if (send_ret != AVERROR(EAGAIN)) {
+        LOG_ERROR(std::string("avcodec_send_frame failed, ret = ") + av_err2str(send_ret));
+        return send_ret;
+      }
+      // EAGAIN: drain whatever's ready, then retry sending this same
+      // frame, bounded by the same ENCODE_TIMEOUT_MS budget the
+      // original receive loop used.
+      if (!drain_available_packets(callback, obj, encoded)) {
+        return -1; // drain_available_packets already logged the real error
+      }
+      if (util::elapsed_ms(start) >= ENCODE_TIMEOUT_MS) {
+        LOG_ERROR(std::string("avcodec_send_frame kept returning EAGAIN past the ") +
+                  std::to_string(ENCODE_TIMEOUT_MS) + "ms budget");
+        return -1;
+      }
+    }
+
+    // Frame accepted -- collect whatever it produced. With max_b_frames=0
+    // (see set_av_codec_ctx) this is normally exactly one packet, but
+    // draining fully here is still correct and matches ffmpeg's own
+    // encode examples.
+    if (!drain_available_packets(callback, obj, encoded)) {
+      return -1;
+    }
     return encoded ? 0 : -1;
   }
 
@@ -492,6 +608,20 @@ int ffmpeg_vram_set_framerate(FFmpegVRamEncoder *encoder, int32_t framerate) {
   }
   return -1;
 }
+int ffmpeg_vram_set_force_idr(void *encoder) {
+  try {
+    FFmpegVRamEncoder *enc = (FFmpegVRamEncoder *)encoder;
+    if (!enc) {
+      return -1;
+    }
+    enc->force_idr_ = true;
+    return 0;
+  } catch (const std::exception &e) {
+    LOG_ERROR(std::string("set force idr failed: ") + e.what());
+  }
+  return -1;
+}
+
 
 int ffmpeg_vram_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum,
                             int32_t *outDescNum, DataFormat dataFormat,

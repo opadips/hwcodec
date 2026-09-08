@@ -35,5 +35,6 @@ int mfx_test_decode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum, 
 int mfx_set_bitrate(void *encoder, int32_t kbs);
 
 int mfx_set_framerate(void *encoder, int32_t framerate);
+int mfx_set_force_idr(void *encoder);
 
 #endif // MFX_FFI_H

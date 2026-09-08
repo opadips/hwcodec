@@ -71,6 +71,10 @@ pub struct EncodeCalls {
     pub test: TestEncodeCall,
     pub set_bitrate: IVICall,
     pub set_framerate: IVICall,
+    /// Make the next encoded frame a self-contained IDR without
+    /// rebuilding the encoder. Backends that can't do it return
+    /// non-zero so callers can fall back.
+    pub set_force_idr: IVCall,
 }
 pub struct DecodeCalls {
     pub new: NewDecoderCall,

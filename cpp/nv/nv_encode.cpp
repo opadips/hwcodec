@@ -59,6 +59,9 @@ void free_driver(CudaFunctions **pp_cuda_dl, NvencFunctions **pp_nvenc_dl) {
 
 class NvencEncoder {
 public:
+  // Set by nv_set_force_idr, consumed by the next encode(). See the
+  // AMF backend's equivalent for why on-demand IDR beats rebuilding.
+  bool force_idr_ = false;
   std::unique_ptr<NativeDevice> native_ = nullptr;
   NvEncoderD3D11 *pEnc_ = nullptr;
   CudaFunctions *cuda_dl_ = nullptr;
@@ -186,8 +189,17 @@ public:
 #endif
 
     NV_ENC_PIC_PARAMS picParams = {0};
+    picParams.version = NV_ENC_PIC_PARAMS_VER;
     picParams.inputTimeStamp = ms;
-    pEnc_->EncodeFrame(vPacket);
+    if (force_idr_) {
+      force_idr_ = false;
+      // FORCEIDR alone gives an IDR but not the parameter sets; a
+      // decoder that has lost sync needs both, which is what the old
+      // "rebuild the encoder" workaround was really providing.
+      picParams.encodePicFlags =
+          NV_ENC_PIC_FLAG_FORCEIDR | NV_ENC_PIC_FLAG_OUTPUT_SPSPPS;
+    }
+    pEnc_->EncodeFrame(vPacket, &picParams);
     for (NvPacket &packet : vPacket) {
       int32_t key = (packet.pictureType == NV_ENC_PIC_TYPE_IDR ||
                      packet.pictureType == NV_ENC_PIC_TYPE_I)
@@ -502,6 +514,19 @@ int nv_set_framerate(void *e, int32_t framerate) {
     RECONFIGURE_TAIL
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set framerate failed: ") + e.what());
+  }
+  return -1;
+}
+int nv_set_force_idr(void *e) {
+  try {
+    NvencEncoder *enc = (NvencEncoder *)e;
+    if (!enc) {
+      return -1;
+    }
+    enc->force_idr_ = true;
+    return 0;
+  } catch (const std::exception &e) {
+    LOG_ERROR(std::string("set force idr failed: ") + e.what());
   }
   return -1;
 }

@@ -35,5 +35,8 @@ int amf_test_decode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum, 
 int amf_set_bitrate(void *encoder, int32_t kbs);
 
 int amf_set_framerate(void *encoder, int32_t framerate);
+// Make the next encoded frame a self-contained IDR (with parameter
+// sets), without rebuilding the encoder. Returns 0 on success.
+int amf_set_force_idr(void *encoder);
 
 #endif // AMF_FFI_H

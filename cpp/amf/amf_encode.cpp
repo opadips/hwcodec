@@ -60,6 +60,11 @@ public:
   DataFormat dataFormat_;
   amf::AMFComponentPtr AMFEncoder_ = NULL;
   amf::AMFContextPtr AMFContext_ = NULL;
+  // Set by amf_set_force_idr, consumed by the next encode(). Lets a
+  // caller get a fresh, self-contained IDR on demand instead of
+  // destroying and rebuilding the whole encoder. Public alongside the
+  // other fields the C entry points below reach into.
+  bool force_idr_ = false;
 
 private:
   // system
@@ -125,6 +130,25 @@ public:
       break;
     }
     surface->SetPts(ms * AMF_MILLISECOND);
+    if (force_idr_) {
+      force_idr_ = false;
+      // AMF takes force-picture-type per *input surface*, not on the
+      // component. The header/SPS-PPS-VPS properties matter just as much
+      // as the picture type: a decoder that has lost sync (or has just
+      // joined) needs the parameter sets to arrive with the IDR, which is
+      // what made the old "rebuild the encoder" approach work at all --
+      // a brand new encoder always emits them on its first frame.
+      if (AMFVideoEncoderVCE_AVC == codec_) {
+        surface->SetProperty(AMF_VIDEO_ENCODER_FORCE_PICTURE_TYPE,
+                             AMF_VIDEO_ENCODER_PICTURE_TYPE_IDR);
+        surface->SetProperty(AMF_VIDEO_ENCODER_INSERT_SPS, true);
+        surface->SetProperty(AMF_VIDEO_ENCODER_INSERT_PPS, true);
+      } else if (AMFVideoEncoder_HEVC == codec_) {
+        surface->SetProperty(AMF_VIDEO_ENCODER_HEVC_FORCE_PICTURE_TYPE,
+                             AMF_VIDEO_ENCODER_HEVC_PICTURE_TYPE_IDR);
+        surface->SetProperty(AMF_VIDEO_ENCODER_HEVC_INSERT_HEADER, true);
+      }
+    }
     res = AMFEncoder_->SubmitInput(surface);
     AMF_CHECK_RETURN(res, "SubmitInput failed");
 
@@ -648,6 +672,20 @@ int amf_set_framerate(void *encoder, int32_t framerate) {
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set framerate to ") + std::to_string(framerate) +
               " failed: " + e.what());
+  }
+  return -1;
+}
+
+int amf_set_force_idr(void *encoder) {
+  try {
+    AMFEncoder *enc = (AMFEncoder *)encoder;
+    if (!enc) {
+      return -1;
+    }
+    enc->force_idr_ = true;
+    return 0;
+  } catch (const std::exception &e) {
+    LOG_ERROR(std::string("set force idr failed: ") + e.what());
   }
   return -1;
 }

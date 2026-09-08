@@ -194,6 +194,41 @@ public:
         LOG_INFO(std::string("More surface"));
         Sleep(1);
         continue;
+      } else if (MFX_ERR_MORE_DATA == sts) {
+        // Documented MFXVideoDECODE_DecodeFrameAsync behaviour, not a
+        // decode error: "The function requires more bitstream at input
+        // before decoding can proceed." Exactly analogous to the
+        // AVERROR(EAGAIN) case already fixed in ffmpeg_ram_decode.cpp --
+        // a normal, expected status this wrapper was previously treating
+        // identically to a genuine bitstream failure, via the same
+        // generic `else` branch below (LOG_ERROR, hard fail).
+        //
+        // Unlike that EAGAIN case, this one can't be resolved by
+        // retrying within this same call: EAGAIN meant "drain existing
+        // output, then resend this same packet", where the packet itself
+        // was already complete. MORE_DATA means the bytes handed to this
+        // specific decode() call don't contain a complete decodable unit
+        // by themselves -- retrying against the same `data`/`len` would
+        // just return MORE_DATA again forever, since nothing new was
+        // added. This call genuinely has nothing to produce a frame
+        // from.
+        //
+        // What this fixes: this call still returns -1 either way (mfx_decode()'s
+        // current int-only return has no way to tell the Rust caller
+        // "this wasn't a real error" without a wider signature change --
+        // flagged as a possible follow-up, not attempted blind here) --
+        // but it's now logged as the expected, non-error condition it
+        // actually is, at the same LOG_INFO level already used for
+        // MFX_WRN_DEVICE_BUSY/MFX_ERR_MORE_SURFACE just above, rather
+        // than being indistinguishable in the log from an actual corrupt
+        // bitstream. That distinction is exactly what made it possible
+        // to tell apart the two different real-world decode-failure
+        // causes found earlier in this same investigation on the FFmpeg
+        // decode path (one silent/EAGAIN, one with a real underlying
+        // libavcodec error attached) -- without it, every failure here
+        // looks identical regardless of cause.
+        LOG_INFO(std::string("more data needed (incomplete bitstream for this call)"));
+        break;
       } else {
         LOG_ERROR(std::string("DecodeFrameAsync failed, sts=") + std::to_string(sts));
         break;

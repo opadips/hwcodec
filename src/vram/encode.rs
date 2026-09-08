@@ -106,6 +106,19 @@ impl Encoder {
             }
         }
     }
+
+    /// Ask the encoder to make its next output frame a self-contained
+    /// keyframe (IDR plus parameter sets). Returns `Err` on backends
+    /// that don't implement it, so callers can fall back to rebuilding
+    /// the encoder rather than silently never getting a keyframe.
+    pub fn set_force_idr(&mut self) -> Result<(), i32> {
+        unsafe {
+            match (self.calls.set_force_idr)(self.codec) {
+                0 => Ok(()),
+                err => Err(err),
+            }
+        }
+    }
 }
 
 impl Drop for Encoder {

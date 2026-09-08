@@ -36,5 +36,8 @@ int nv_test_decode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum, i
 int nv_set_bitrate(void *encoder, int32_t kbs);
 
 int nv_set_framerate(void *encoder, int32_t framerate);
+// Make the next encoded frame a self-contained IDR (with parameter
+// sets), without rebuilding the encoder. Returns 0 on success.
+int nv_set_force_idr(void *encoder);
 
 #endif // NV_FFI_H
