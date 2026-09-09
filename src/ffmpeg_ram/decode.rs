@@ -87,6 +87,14 @@ impl Decoder {
         }
     }
 
+    /// Feed one packet and collect whatever pictures it produced.
+    ///
+    /// An empty `Ok` is a normal outcome, not a quiet failure: the
+    /// decoder accepted the packet and is holding the picture, or the
+    /// packet carried only parameter sets. `Err` means the decode
+    /// genuinely failed, and the reason is already in the log. See
+    /// `do_decode` in ffmpeg_ram_decode.cpp for why these two are worth
+    /// keeping apart.
     pub fn decode(&mut self, packet: &[u8]) -> Result<&mut Vec<DecodeFrame>, i32> {
         unsafe {
             (&mut *self.frames).clear();
@@ -300,8 +308,14 @@ impl Decoder {
 
                     let start = Instant::now();
 
+                    // Requiring a picture, not just a clean return.
+                    // decode() no longer reports "accepted the packet,
+                    // produced nothing" as an error, so a candidate that
+                    // swallows the probe buffer without decoding it would
+                    // otherwise pass this test and then serve a session
+                    // that never shows a frame.
                     match decoder.decode(data) {
-                        Ok(_) => {
+                        Ok(frames) if !frames.is_empty() => {
                             let elapsed = start.elapsed().as_millis();
 
                             if elapsed < TEST_TIMEOUT_MS as _ {
@@ -313,6 +327,12 @@ impl Decoder {
                                     codec.name, elapsed
                                 );
                             }
+                        }
+                        Ok(_) => {
+                            debug!(
+                                "Decoder {} test failed - accepted the probe packet but                                  produced no picture",
+                                codec.name
+                            );
                         }
                         Err(err) => {
                             debug!("Decoder {} test failed with error: {}", codec.name, err);

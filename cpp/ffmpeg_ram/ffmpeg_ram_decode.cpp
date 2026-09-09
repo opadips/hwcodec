@@ -25,6 +25,10 @@ extern "C" {
 // #define CFG_PKG_TRACE
 
 namespace {
+
+// See reset() for why the hwaccel surface pool is given headroom.
+constexpr int EXTRA_HW_FRAMES = 3;
+
 typedef void (*RamDecodeCallback)(const void *obj, int width, int height,
                                   enum AVPixelFormat pixfmt,
                                   int linesize[AV_NUM_DATA_POINTERS],
@@ -131,6 +135,27 @@ public:
         LOG_ERROR(std::string("av_frame_alloc failed"));
         return -1;
       }
+
+      // Headroom in the hwaccel's surface pool, on top of the DPB the
+      // stream itself needs. FFmpeg sizes the D3D11 texture array from
+      // the SPS's reference count alone, which is the theoretical
+      // minimum; a driver that holds a surface a little longer than
+      // FFmpeg assumes then has nothing free to decode the next picture
+      // into. What that looks like from out here is a picture that
+      // simply never arrives -- avcodec_send_packet accepts the packet,
+      // avcodec_receive_frame answers EAGAIN, and nothing is logged at
+      // any level, because from FFmpeg's point of view nothing went
+      // wrong. Moonlight and Sunshine both carry the same headroom, for
+      // the same reason.
+      c_->extra_hw_frames = EXTRA_HW_FRAMES;
+
+      // Hardware encoders routinely stamp a level higher than the
+      // stream actually needs (Intel's in particular), and some D3D11VA
+      // drivers refuse frames on the advertised level alone even though
+      // they decode them perfectly. This is the standard client-side
+      // tolerance for that -- Moonlight sets it for every hwaccel it
+      // opens.
+      c_->hwaccel_flags |= AV_HWACCEL_FLAG_IGNORE_LEVEL;
     }
 
     if (!(pkt_ = av_packet_alloc())) {
@@ -189,6 +214,18 @@ private:
           LOG_ERROR(std::string("hw_frames_ctx is NULL"));
           return false;
         }
+        // av_hwframe_transfer_data() allocates sw_frame_ only on the
+        // first call, sizing it from that first frame; every call after
+        // that transfers into whatever geometry it already has. A stream
+        // that changes resolution mid-session therefore fails with
+        // EINVAL on every frame from that point on -- and keeps failing,
+        // since nothing here ever reconsiders the buffer. Dropping it
+        // when the geometry no longer matches makes the next transfer
+        // re-allocate.
+        if (sw_frame_->buf[0] && (sw_frame_->width != frame_->width ||
+                                  sw_frame_->height != frame_->height)) {
+          av_frame_unref(sw_frame_);
+        }
         if ((ret = av_hwframe_transfer_data(sw_frame_, frame_, 0)) < 0) {
           LOG_ERROR(std::string("av_hwframe_transfer_data failed, ret = ") +
                     av_err2str(ret));
@@ -231,8 +268,26 @@ private:
     return true;
   }
 
+  // Returns 0 when the packet was accepted and nothing went wrong,
+  // whether or not it produced a picture, and -1 only for a genuine
+  // decode failure.
+  //
+  // Those two were the same value until now, and conflating them is
+  // expensive for a live screen-share client. A decoder that has
+  // accepted a packet and not yet produced a picture is in a completely
+  // ordinary state -- it is holding a frame it will emit shortly, or the
+  // packet carried only parameter sets, or a hwaccel surface was
+  // momentarily unavailable. Reporting that as a decode error taught the
+  // caller to treat it as a broken reference chain, which it answers by
+  // asking the sender for a keyframe; on a link where it happens with
+  // any regularity that becomes a standing keyframe request, and every
+  // keyframe granted is bitrate spent re-sending a picture that was
+  // never lost. The caller can still see exactly how many pictures came
+  // out -- the callback pushes each one -- so nothing is hidden by
+  // this; it just stops being called an error.
   int do_decode(const void *obj) {
     bool decoded = false;
+    bool failed = false;
     auto start = util::now();
 
     // avcodec_send_packet() can legitimately return AVERROR(EAGAIN).
@@ -258,17 +313,20 @@ private:
       }
       if (send_ret != AVERROR(EAGAIN)) {
         LOG_ERROR(std::string("avcodec_send_packet failed, ret = ") + av_err2str(send_ret));
+        failed = true;
         goto _exit;
       }
       // EAGAIN: drain whatever's ready, then retry sending this same
       // packet, bounded by the same ENCODE_TIMEOUT_MS budget the
       // original receive loop used.
       if (!drain_available_frames(obj, decoded)) {
+        failed = true;
         goto _exit; // drain_available_frames already logged the real error
       }
       if (util::elapsed_ms(start) >= ENCODE_TIMEOUT_MS) {
         LOG_ERROR(std::string("avcodec_send_packet kept returning EAGAIN past the ") +
                   std::to_string(ENCODE_TIMEOUT_MS) + "ms budget");
+        failed = true;
         goto _exit;
       }
     }
@@ -277,11 +335,14 @@ private:
     // AV_CODEC_FLAG_LOW_DELAY and max_b_frames=0 (see set_av_codec_ctx)
     // this is normally exactly one frame, but draining fully here is
     // still correct and matches ffmpeg's own decode examples.
-    drain_available_frames(obj, decoded);
+    if (!drain_available_frames(obj, decoded)) {
+      failed = true;
+    }
 
   _exit:
     av_packet_unref(pkt_);
-    return decoded ? 0 : -1;
+    (void)decoded;
+    return failed ? -1 : 0;
   }
 
   bool check_support() {
