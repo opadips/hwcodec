@@ -298,8 +298,24 @@ public:
   }
 
   int set_framerate(int framerate) {
-    c_->time_base = av_make_q(1, framerate);
-    c_->framerate = av_inv_q(c_->time_base);
+    if (framerate <= 0) {
+      return -1;
+    }
+    // time_base is deliberately NOT touched. This encoder is fed
+    // timestamps in milliseconds (see do_encode's `frame_->pts = ms`),
+    // which is why set_av_codec_ctx opens the context with a 1/1000 time
+    // base. Rewriting it to 1/framerate here reinterpreted every
+    // timestamp already in flight: at 6fps a pts of 200 -- 200ms --
+    // became 200/6 = 33 seconds, so rate control saw a stream that had
+    // barely advanced and allocated a few hundred bytes per frame. A real
+    // session measured 540KB of 1080p H.265 across two minutes before
+    // this was found.
+    //
+    // Note that most backends read the frame rate when the context is
+    // opened, so this may legitimately change nothing; the point is that
+    // it must not change the wrong thing.
+    framerate_ = framerate;
+    c_->framerate = av_make_q(framerate, 1);
     return 0;
   }
 
