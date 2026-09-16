@@ -445,7 +445,7 @@ int nv_encode(void *encoder, void *texture, EncodeCallback callback, void *obj,
     return 0;                                                                  \
   }
 
-int nv_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum, int32_t *outDescNum,
+int nv_test_encode(int64_t *outLuids, int32_t *outVendors, int64_t *outElapsedMs, int32_t maxDescNum, int32_t *outDescNum,
                    DataFormat dataFormat, int32_t width,
                    int32_t height, int32_t kbs, int32_t framerate,
                    int32_t gop, const int64_t *excludedLuids, const int32_t *excludeFormats, int32_t excludeCount) {
@@ -475,6 +475,7 @@ int nv_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum, i
         if (succ && elapsed < TEST_TIMEOUT_MS) {
           outLuids[count] = currentLuid;
           outVendors[count] = VENDOR_NV;
+          outElapsedMs[count] = elapsed;
           count += 1;
         }
       }

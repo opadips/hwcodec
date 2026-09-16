@@ -181,6 +181,7 @@ pub fn available(d: DynamicContext) -> Vec<FeatureContext> {
                 vendor: driver, // Initially set vendor same as driver, will be updated by test results
                 data_format: n.format,
                 luid: 0,
+                test_encode_ms: 0,
             },
             d,
         })
@@ -207,6 +208,7 @@ pub fn available(d: DynamicContext) -> Vec<FeatureContext> {
 
         let mut luids: Vec<i64> = vec![0; crate::vram::MAX_ADATERS];
         let mut vendors: Vec<i32> = vec![0; crate::vram::MAX_ADATERS];
+        let mut elapsed_ms: Vec<i64> = vec![0; crate::vram::MAX_ADATERS];
         let mut desc_count: i32 = 0;
 
         let (excluded_luids, exclude_formats): (Vec<i64>, Vec<i32>) = exclude_luid_formats
@@ -218,6 +220,7 @@ pub fn available(d: DynamicContext) -> Vec<FeatureContext> {
             test(
                 luids.as_mut_ptr(),
                 vendors.as_mut_ptr(),
+                elapsed_ms.as_mut_ptr(),
                 luids.len() as _,
                 &mut desc_count,
                 input.f.data_format as i32,
@@ -241,6 +244,7 @@ pub fn available(d: DynamicContext) -> Vec<FeatureContext> {
                 for i in 0..desc_count as usize {
                     let mut input = input.clone();
                     input.f.luid = luids[i];
+                    input.f.test_encode_ms = elapsed_ms[i];
                     input.f.vendor = match vendors[i] {
                         0 => NV,
                         1 => AMF,

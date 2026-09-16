@@ -24,7 +24,7 @@ int nv_decode(void *decoder, uint8_t *data, int len, DecodeCallback callback,
 
 int nv_destroy_decoder(void *decoder);
 
-int nv_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum, int32_t *outDescNum,
+int nv_test_encode(int64_t *outLuids, int32_t *outVendors, int64_t *outElapsedMs, int32_t maxDescNum, int32_t *outDescNum,
                    int32_t dataFormat, int32_t width,
                    int32_t height, int32_t kbs, int32_t framerate, int32_t gop,
                    const int64_t *excludedLuids, const int32_t *excludeFormats, int32_t excludeCount);

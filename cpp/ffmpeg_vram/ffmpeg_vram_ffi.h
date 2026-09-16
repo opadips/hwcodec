@@ -21,7 +21,7 @@ int ffmpeg_vram_encode(void *encoder, void *tex, EncodeCallback callback,
                        void *obj, int64_t ms);
 int ffmpeg_vram_destroy_encoder(void *encoder);
 
-int ffmpeg_vram_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum,
+int ffmpeg_vram_test_encode(int64_t *outLuids, int32_t *outVendors, int64_t *outElapsedMs, int32_t maxDescNum,
                             int32_t *outDescNum,
                             int32_t dataFormat, int32_t width, int32_t height,
                             int32_t kbs, int32_t framerate, int32_t gop,

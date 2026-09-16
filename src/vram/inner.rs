@@ -34,6 +34,7 @@ pub type DecodeCall = unsafe extern "C" fn(
 pub type TestEncodeCall = unsafe extern "C" fn(
     outLuids: *mut i64,
     outVendors: *mut i32,
+    outElapsedMs: *mut i64,
     maxDescNum: i32,
     outDescNum: *mut i32,
     dataFormat: i32,

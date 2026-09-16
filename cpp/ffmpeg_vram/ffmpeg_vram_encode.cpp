@@ -639,7 +639,7 @@ int ffmpeg_vram_set_force_idr(void *encoder) {
 }
 
 
-int ffmpeg_vram_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum,
+int ffmpeg_vram_test_encode(int64_t *outLuids, int32_t *outVendors, int64_t *outElapsedMs, int32_t maxDescNum,
                             int32_t *outDescNum, DataFormat dataFormat,
                             int32_t width, int32_t height, int32_t kbs,
                             int32_t framerate, int32_t gop,
@@ -681,6 +681,7 @@ int ffmpeg_vram_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxD
           if (succ && elapsed < TEST_TIMEOUT_MS) {
             outLuids[count] = currentLuid;
             outVendors[count] = (int32_t)vendorMap.driver_vendor;  // Map adapter vendor to driver vendor
+            outElapsedMs[count] = elapsed;
             count += 1;
           }
         }

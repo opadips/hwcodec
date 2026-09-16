@@ -251,11 +251,15 @@ public:
     auto start = util::now();
     res = encode(native, util_encode::vram_encode_test_callback, &key_obj, 0);
     int64_t elapsed = util::elapsed_ms(start);
+    test_elapsed_ms_ = elapsed;
     if (res == AMF_OK && key_obj == 1 && elapsed < TEST_TIMEOUT_MS) {
       return AMF_OK;
     }
     return AMF_FAIL;
   }
+
+  // How long test()'s one frame took, for the caller to report.
+  int64_t test_elapsed_ms_ = 0;
 
   AMF_RESULT initialize() {
     AMF_RESULT res;
@@ -592,7 +596,7 @@ int amf_driver_support() {
   return -1;
 }
 
-int amf_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum, int32_t *outDescNum,
+int amf_test_encode(int64_t *outLuids, int32_t *outVendors, int64_t *outElapsedMs, int32_t maxDescNum, int32_t *outDescNum,
                     DataFormat dataFormat, int32_t width,
                     int32_t height, int32_t kbs, int32_t framerate,
                     int32_t gop, const int64_t *excludedLuids, const int32_t *excludeFormats, int32_t excludeCount) {
@@ -615,6 +619,7 @@ int amf_test_encode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum, 
       if (e->test() == AMF_OK) {
         outLuids[count] = currentLuid;
         outVendors[count] = VENDOR_AMD;
+        outElapsedMs[count] = e->test_elapsed_ms_;
         count += 1;
       }
       e->destroy();

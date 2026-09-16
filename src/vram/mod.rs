@@ -21,6 +21,14 @@ pub struct FeatureContext {
     pub vendor: Driver,
     pub luid: i64,
     pub data_format: DataFormat,
+    /// How long the probe's one test frame took to encode on this
+    /// adapter, in milliseconds. Every backend already measured this to
+    /// apply its pass/fail timeout; it is now reported so a caller can
+    /// rank candidates by what they cost rather than by which vendor they
+    /// are. One frame from a cold encoder, so an upper estimate -- but
+    /// the same upper estimate for every candidate.
+    #[serde(default)]
+    pub test_encode_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
