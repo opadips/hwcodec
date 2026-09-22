@@ -65,6 +65,10 @@ public:
   // destroying and rebuilding the whole encoder. Public alongside the
   // other fields the C entry points below reach into.
   bool force_idr_ = false;
+  // Reached by amf_set_bitrate, which resizes the rate controller's
+  // buffer with the bitrate.
+  int32_t bitRateIn_;
+  int32_t frameRate_;
 
 private:
   // system
@@ -78,8 +82,6 @@ private:
   // const
   AMF_COLOR_BIT_DEPTH_ENUM eDepth_ = AMF_COLOR_BIT_DEPTH_8;
   int query_timeout_ = ENCODE_TIMEOUT_MS;
-  int32_t bitRateIn_;
-  int32_t frameRate_;
   int32_t gop_;
   bool enable4K_ = false;
   bool full_range_ = false;
@@ -390,6 +392,14 @@ private:
       res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_IDR_PERIOD, gop_);
       AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_IDR_PERIOD failed");
 
+      // A buffer of a couple of frames: no frame, keyframes included,
+      // may be much larger than the others. See VBV_FRAMES.
+      res = AMFEncoder_->SetProperty(
+          AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE,
+          (amf_int64)vbv_bits(bitRateIn_, frameRate_));
+      AMF_CHECK_RETURN(res,
+                       "SetProperty AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE failed");
+
     } else if (codecStr == amf_wstring(AMFVideoEncoder_HEVC)) {
       // ------------- Encoder params usage---------------
       res = AMFEncoder_->SetProperty(
@@ -486,6 +496,12 @@ private:
                                      gop_); // todo
       AMF_CHECK_RETURN(res,
                        "SetProperty AMF_VIDEO_ENCODER_HEVC_GOP_SIZE failed");
+
+      res = AMFEncoder_->SetProperty(
+          AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE,
+          (amf_int64)vbv_bits(bitRateIn_, frameRate_));
+      AMF_CHECK_RETURN(
+          res, "SetProperty AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE failed");
     } else {
       return AMF_FAIL;
     }
@@ -641,16 +657,25 @@ int amf_set_bitrate(void *encoder, int32_t kbs) {
   try {
     AMFEncoder *enc = (AMFEncoder *)encoder;
     AMF_RESULT res = AMF_FAIL;
+    amf_int64 vbv = (amf_int64)vbv_bits((int64_t)kbs * 1000, enc->frameRate_);
     switch (enc->dataFormat_) {
     case H264:
       res = enc->AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_TARGET_BITRATE,
                                           kbs * 1000);
+      if (res == AMF_OK)
+        res = enc->AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE,
+                                            vbv);
       break;
     case H265:
       res = enc->AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE,
                                           kbs * 1000);
+      if (res == AMF_OK)
+        res = enc->AMFEncoder_->SetProperty(
+            AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, vbv);
       break;
     }
+    if (res == AMF_OK)
+      enc->bitRateIn_ = kbs * 1000;
     return res == AMF_OK ? 0 : -1;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set bitrate to ") + std::to_string(kbs) +

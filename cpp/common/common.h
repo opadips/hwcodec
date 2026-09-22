@@ -5,6 +5,22 @@
 
 #define MAX_GOP 0x7FFFFFFF // i32 max
 
+// The rate controller's buffer (VBV / HRD), in frames of the target
+// bitrate. A frame -- an IDR most of all -- cannot exceed what the buffer
+// holds, so this bounds the burst any single frame puts on the wire: at
+// one frame the encoder may not spend more on a keyframe than on any
+// other frame (Sunshine's default); two leaves it a scene cut's worth of
+// headroom. With an unbounded buffer a 1440p keyframe at 6 Mbit ran to
+// 440 KB -- ten frames' worth in one write -- and a policed link answered
+// with a run of retransmission timers.
+#define VBV_FRAMES 2
+
+static inline int64_t vbv_bits(int64_t bits_per_second, int fps) {
+  if (fps <= 0)
+    fps = 30;
+  return bits_per_second / fps * VBV_FRAMES;
+}
+
 #define TEST_TIMEOUT_MS 1000
 #define ENCODE_TIMEOUT_MS 1000
 #define DECODE_TIMEOUT_MS 1000

@@ -160,6 +160,12 @@ public:
     // rc method
     initializeParams.encodeConfig->rcParams.rateControlMode =
         NV_ENC_PARAMS_RC_CBR;
+    // A buffer of a couple of frames: no frame, keyframes included, may
+    // be much larger than the others. See VBV_FRAMES.
+    initializeParams.encodeConfig->rcParams.vbvBufferSize =
+        (uint32_t)vbv_bits((int64_t)kbs_ * 1000, framerate_);
+    initializeParams.encodeConfig->rcParams.vbvInitialDelay =
+        initializeParams.encodeConfig->rcParams.vbvBufferSize;
     // color
     if (dataFormat_ == H264) {
       setup_h264(initializeParams.encodeConfig);
@@ -499,6 +505,11 @@ int nv_set_bitrate(void *e, int32_t kbs) {
     RECONFIGURE_HEAD
     params.reInitEncodeParams.encodeConfig->rcParams.averageBitRate =
         kbs * 1000;
+    params.reInitEncodeParams.encodeConfig->rcParams.vbvBufferSize =
+        (uint32_t)vbv_bits((int64_t)kbs * 1000, enc->framerate_);
+    params.reInitEncodeParams.encodeConfig->rcParams.vbvInitialDelay =
+        params.reInitEncodeParams.encodeConfig->rcParams.vbvBufferSize;
+    enc->kbs_ = kbs;
     RECONFIGURE_TAIL
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set bitrate to ") + std::to_string(kbs) +
