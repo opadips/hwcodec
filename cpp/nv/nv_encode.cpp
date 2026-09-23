@@ -288,6 +288,14 @@ public:
     h264->sliceMode = 3;
     h264->sliceModeData = 1;
     h264->repeatSPSPPS = 1;
+    // The IDR interval follows the GOP. CreateDefaultEncoderParams sets
+    // gopLength to infinite, then copies the low-latency preset over the
+    // config a second time, then derives idrPeriod from the *preset's*
+    // gopLength -- so resetting gopLength above left idrPeriod at the
+    // preset default and NVENC sent an IDR about every 60 frames (56 in
+    // 3289 in the field). Sunshine sets idrPeriod explicitly for the same
+    // reason.
+    h264->idrPeriod = encodeConfig->gopLength;
     // Specifies the chroma format. Should be set to 1 for yuv420 input, 3 for
     // yuv444 input
     h264->chromaFormatIDC = 1;
@@ -311,6 +319,8 @@ public:
     hevc->sliceMode = 3;
     hevc->sliceModeData = 1;
     hevc->repeatSPSPPS = 1;
+    // See setup_h264: the IDR interval follows the GOP.
+    hevc->idrPeriod = encodeConfig->gopLength;
     // Specifies the chroma format. Should be set to 1 for yuv420 input, 3 for
     // yuv444 input
     hevc->chromaFormatIDC = 1;
