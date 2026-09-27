@@ -409,7 +409,8 @@ private:
     // AV_PICTURE_TYPE_I makes the encoder emit an IDR (with fresh
     // SPS/PPS/VPS) for it. Honoured by the hardware wrappers this file
     // drives -- amfenc maps it to FORCE_PICTURE_TYPE_IDR, nvenc to
-    // NV_ENC_PIC_FLAG_FORCEIDR, qsv to MFX_FRAMETYPE_IDR. Cleared
+    // NV_ENC_PIC_FLAG_FORCEIDR, qsv to MFX_FRAMETYPE_IDR (only with its
+    // forced_idr option, which set_lantency_free turns on). Cleared
     // immediately so exactly one frame is forced per request; AV_PICTURE
     // _TYPE_NONE is the "encoder decides" default the rest of the time.
     //

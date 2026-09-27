@@ -96,6 +96,15 @@ bool set_lantency_free(void *priv_data, const std::string &name) {
       LOG_ERROR(std::string("qsv set_lantency_free failed, ret = ") + av_err2str(ret));
       return false;
     }
+    // A frame tagged AV_PICTURE_TYPE_I (see set_force_idr) is only an IDR
+    // on QuickSync with this set; without it qsvenc makes a non-IDR intra
+    // picture that a fresh decoder cannot start from. An HD P530 laptop's
+    // H.265 sessions showed no picture for up to a minute: every keyframe
+    // the viewer asked for came out as one.
+    if ((ret = av_opt_set_int(priv_data, "forced_idr", 1, 0)) < 0) {
+      LOG_ERROR(std::string("qsv set forced_idr failed, ret = ") + av_err2str(ret));
+      return false;
+    }
   }
   if (name.find("vaapi") != std::string::npos) {
     if ((ret = av_opt_set(priv_data, "async_depth", "1", 0)) < 0) {
