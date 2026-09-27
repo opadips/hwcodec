@@ -312,10 +312,16 @@ bool change_bit_rate(AVCodecContext *c, const std::string &name, int kbs) {
   if (kbs > 0) {
     c->bit_rate = kbs * 1000;
     c->rc_max_rate = c->bit_rate;
-    c->rc_buffer_size = (int)vbv_bits(c->bit_rate, c->framerate.num > 0 ? c->framerate.num : 30);
     if (name.find("qsv") != std::string::npos) {
+      // The buffer stays as the encoder was opened with. FFmpeg applies a
+      // rate change on QuickSync with MFXVideoENCODE_Reset on the next
+      // frame, and an Intel runtime may refuse a Reset that also changes
+      // BufferSizeInKB (MFX_ERR_INCOMPATIBLE_VIDEO_PARAM) -- which that
+      // next encode reports as EINVAL: an HD P530 laptop ended every H.265
+      // session on its third frame, the first after a rate change.
       c->bit_rate--; // cbr with vbr
     } else {
+      c->rc_buffer_size = (int)vbv_bits(c->bit_rate, c->framerate.num > 0 ? c->framerate.num : 30);
       c->rc_min_rate = c->bit_rate;
     }
   }
