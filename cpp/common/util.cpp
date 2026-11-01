@@ -17,6 +17,10 @@ extern "C" {
 
 namespace util_encode {
 
+// libx264's speed/quality trade-off. veryfast keeps a 720p frame within a
+// 20 fps budget on a 2-core machine; superfast if a slow host cannot.
+static const char *X264_PRESET = "veryfast";
+
 void set_av_codec_ctx(AVCodecContext *c, const std::string &name, int kbs,
                       int gop, int fps) {
   c->has_b_frames = 0;
@@ -109,6 +113,25 @@ bool set_lantency_free(void *priv_data, const std::string &name) {
   if (name.find("vaapi") != std::string::npos) {
     if ((ret = av_opt_set(priv_data, "async_depth", "1", 0)) < 0) {
       LOG_ERROR(std::string("vaapi set_lantency_free failed, ret = ") + av_err2str(ret));
+      return false;
+    }
+  }
+  if (name == "libx264") {
+    // x264's defaults (preset medium, 40 frames of lookahead, frame
+    // threads) hold frames back and cost far too much CPU for a live
+    // screen. zerolatency: no lookahead, no frame threads, sliced threads.
+    if ((ret = av_opt_set(priv_data, "preset", X264_PRESET, 0)) < 0) {
+      LOG_ERROR(std::string("libx264 set preset failed, ret = ") + av_err2str(ret));
+      return false;
+    }
+    if ((ret = av_opt_set(priv_data, "tune", "zerolatency", 0)) < 0) {
+      LOG_ERROR(std::string("libx264 set tune failed, ret = ") + av_err2str(ret));
+      return false;
+    }
+    // A frame tagged AV_PICTURE_TYPE_I becomes an IDR, which a fresh
+    // decoder can start from.
+    if ((ret = av_opt_set_int(priv_data, "forced-idr", 1, 0)) < 0) {
+      LOG_ERROR(std::string("libx264 set forced-idr failed, ret = ") + av_err2str(ret));
       return false;
     }
   }
