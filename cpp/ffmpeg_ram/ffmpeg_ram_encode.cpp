@@ -431,6 +431,8 @@ ffmpeg_ram_new_encoder(const char *name, const char *mc_name, int width,
     }
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("new FFmpegRamEncoder failed, ") + std::string(e.what()));
+  } catch (...) {
+    LOG_ERROR("ffmpeg_ram_new_encoder: unknown exception");
   }
   if (encoder) {
     encoder->free_encoder();
@@ -446,6 +448,8 @@ extern "C" int ffmpeg_ram_encode(FFmpegRamEncoder *encoder, const uint8_t *data,
     return encoder->encode(data, length, obj, ms);
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("ffmpeg_ram_encode failed, ") + std::string(e.what()));
+  } catch (...) {
+    LOG_ERROR("ffmpeg_ram_encode: unknown exception");
   }
   return -1;
 }
@@ -459,6 +463,8 @@ extern "C" void ffmpeg_ram_free_encoder(FFmpegRamEncoder *encoder) {
     encoder = NULL;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("free encoder failed, ") + std::string(e.what()));
+  } catch (...) {
+    LOG_ERROR("ffmpeg_ram_free_encoder: unknown exception");
   }
 }
 
@@ -467,6 +473,8 @@ extern "C" int ffmpeg_ram_set_bitrate(FFmpegRamEncoder *encoder, int kbs) {
     return encoder->set_bitrate(kbs);
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("ffmpeg_ram_set_bitrate failed, ") + std::string(e.what()));
+  } catch (...) {
+    LOG_ERROR("ffmpeg_ram_set_bitrate: unknown exception");
   }
   return -1;
 }

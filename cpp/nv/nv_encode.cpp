@@ -265,6 +265,8 @@ public:
         // DestroyEncoder() regardless, rather than leaking pEnc_ by
         // letting this exception skip the rest of destroy().
         LOG_ERROR(std::string("EndEncode before destroy failed: ") + e.what());
+      } catch (...) {
+        LOG_ERROR("unknown exception");
       }
       pEnc_->DestroyEncoder();
       delete pEnc_;
@@ -389,6 +391,8 @@ int nv_encode_driver_support() {
     return 0;
   } catch (const std::exception &e) {
     LOG_TRACE(std::string("driver not support, ") + e.what());
+  } catch (...) {
+    LOG_TRACE("driver not supported: unknown exception");
   }
   return -1;
 }
@@ -404,6 +408,8 @@ int nv_destroy_encoder(void *encoder) {
     return 0;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("destroy failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -421,6 +427,9 @@ void *nv_new_encoder(void *handle, int64_t luid, DataFormat dataFormat,
     return e;
   } catch (const std::exception &ex) {
     LOG_ERROR(std::string("new failed: ") + ex.what());
+    goto _exit;
+  } catch (...) {
+    LOG_ERROR("unknown exception");
     goto _exit;
   }
 
@@ -440,6 +449,8 @@ int nv_encode(void *encoder, void *texture, EncodeCallback callback, void *obj,
     return e->encode(texture, callback, obj, ms);
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("encode failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -506,6 +517,8 @@ int nv_test_encode(int64_t *outLuids, int32_t *outVendors, int64_t *outElapsedMs
 
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("test failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -524,6 +537,8 @@ int nv_set_bitrate(void *e, int32_t kbs) {
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set bitrate to ") + std::to_string(kbs) +
               "k failed: " + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -536,6 +551,8 @@ int nv_set_framerate(void *e, int32_t framerate) {
     RECONFIGURE_TAIL
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set framerate failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -549,6 +566,8 @@ int nv_set_force_idr(void *e) {
     return 0;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set force idr failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }

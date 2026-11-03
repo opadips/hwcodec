@@ -370,6 +370,8 @@ private:
       } else {
         LOG_ERROR(std::string("Exception decode_and_recreate: ") + e.what());
       }
+    } catch (...) {
+      LOG_ERROR("unknown exception");
     }
 
     return -1;
@@ -595,6 +597,8 @@ int nv_decode_driver_support() {
     free_driver(&cudl, &cvdl);
     return 0;
   } catch (const std::exception &e) {
+  } catch (...) {
+    LOG_TRACE("driver not supported: unknown exception");
   }
   return -1;
 }
@@ -610,6 +614,8 @@ int nv_destroy_decoder(void *decoder) {
     return 0;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("destroy failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -626,6 +632,9 @@ void *nv_new_decoder(void *device, int64_t luid,
       return p;
   } catch (const std::exception &ex) {
     LOG_ERROR(std::string("destroy failed: ") + ex.what());
+    goto _exit;
+  } catch (...) {
+    LOG_ERROR("unknown exception");
     goto _exit;
   }
 
@@ -647,6 +656,8 @@ int nv_decode(void *decoder, uint8_t *data, int len, DecodeCallback callback,
     }
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("decode failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return HWCODEC_ERR_COMMON;
 }
@@ -687,6 +698,8 @@ int nv_test_decode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum,
     return 0;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("test failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }

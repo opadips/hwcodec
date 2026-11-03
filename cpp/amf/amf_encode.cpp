@@ -553,6 +553,8 @@ int amf_destroy_encoder(void *encoder) {
     return 0;
   } catch (const std::exception &e) {
           LOG_ERROR(std::string("destroy failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -579,6 +581,8 @@ void *amf_new_encoder(void *handle, int64_t luid,
     }
   } catch (const std::exception &e) {
           LOG_ERROR(std::string("new failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   if (enc) {
     enc->destroy();
@@ -595,19 +599,32 @@ int amf_encode(void *encoder, void *tex, EncodeCallback callback, void *obj,
     return -enc->encode(tex, callback, obj, ms);
   } catch (const std::exception &e) {
           LOG_ERROR(std::string("encode failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
 
 int amf_driver_support() {
+  // Keep the DLL loaded until any driver exception has been handled.
+  struct ProbeFactory : AMFFactoryHelper {
+    ~ProbeFactory() {
+      // Failed Init has loaded the DLL without incrementing m_iRefCount.
+      if (m_hDLLHandle && m_iRefCount == 0) {
+        amf_free_library(m_hDLLHandle);
+        m_hDLLHandle = nullptr;
+      }
+    }
+  } factory;
   try {
-    AMFFactoryHelper factory;
     AMF_RESULT res = factory.Init();
     if (res == AMF_OK) {
       factory.Terminate();
       return 0;
     }
   } catch (const std::exception &e) {
+  } catch (...) {
+    LOG_TRACE("driver not supported: unknown exception");
   }
   return -1;
 }
@@ -649,6 +666,8 @@ int amf_test_encode(int64_t *outLuids, int32_t *outVendors, int64_t *outElapsedM
 
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("test ") + std::to_string(kbs) + " failed: " + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -680,6 +699,8 @@ int amf_set_bitrate(void *encoder, int32_t kbs) {
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set bitrate to ") + std::to_string(kbs) +
               "k failed: " + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -702,6 +723,8 @@ int amf_set_framerate(void *encoder, int32_t framerate) {
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set framerate to ") + std::to_string(framerate) +
               " failed: " + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -716,6 +739,8 @@ int amf_set_force_idr(void *encoder) {
     return 0;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("set force idr failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
