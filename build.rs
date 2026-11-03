@@ -169,6 +169,13 @@ mod ffmpeg {
                 } else if mfx_path.exists() {
                     static_libs.push("libmfx");
                 }
+                // x264, behind FFmpeg's libx264 encoder (the software H.264),
+                // when FFmpeg was built with it (vcpkg's x264 feature).
+                if path.join("lib").join("libx264.lib").exists() {
+                    static_libs.push("libx264");
+                } else if path.join("lib").join("x264.lib").exists() {
+                    static_libs.push("x264");
+                }
             }
             static_libs
                 .iter()

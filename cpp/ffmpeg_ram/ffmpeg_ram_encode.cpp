@@ -231,6 +231,12 @@ public:
         hw_pixfmt_ != AV_PIX_FMT_NONE ? hw_pixfmt_ : (AVPixelFormat)pixfmt_;
     c_->sw_pix_fmt = (AVPixelFormat)pixfmt_;
     util_encode::set_av_codec_ctx(c_, name_, kbs_, gop_, fps_);
+    if (name_ == "libx264" && thread_count_ > 1) {
+      // Sliced threads (zerolatency's choice): more threads, no added delay.
+      c_->slices = 0;
+      c_->thread_type = FF_THREAD_SLICE;
+      c_->thread_count = thread_count_;
+    }
     if (!util_encode::set_lantency_free(c_->priv_data, name_)) {
       LOG_ERROR(std::string("set_lantency_free failed, name: ") + name_);
       return false;
