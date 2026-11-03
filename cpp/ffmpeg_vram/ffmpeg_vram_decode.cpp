@@ -320,6 +320,37 @@ extern "C" int ffmpeg_vram_destroy_decoder(FFmpegVRamDecoder *decoder) {
   return -1;
 }
 
+extern "C" int ffmpeg_vram_decode_set_color(FFmpegVRamDecoder *decoder,
+                                             int32_t matrix,
+                                             int32_t full_range) {
+  try {
+    if (!decoder || !decoder->native_)
+      return -1;
+    decoder->bt709_ = matrix == 1;
+    decoder->full_range_ = full_range != 0;
+    return decoder->native_->SetNv12Color(matrix, full_range != 0) ? 0 : -1;
+  } catch (const std::exception &e) {
+    LOG_ERROR(std::string("ffmpeg_vram_decode_set_color exception:") + e.what());
+  } catch (...) {
+    LOG_ERROR("ffmpeg_vram_decode_set_color: unknown exception");
+  }
+  return -1;
+}
+
+extern "C" int ffmpeg_vram_decode_supported(int64_t luid, int32_t dataFormat) {
+  try {
+    NativeDevice native;
+    if (!native.Init(luid, nullptr, 1))
+      return 0;
+    return native.support_decode((DataFormat)dataFormat) ? 1 : 0;
+  } catch (const std::exception &e) {
+    LOG_ERROR(std::string("ffmpeg_vram_decode_supported exception:") + e.what());
+  } catch (...) {
+    LOG_ERROR("ffmpeg_vram_decode_supported: unknown exception");
+  }
+  return 0;
+}
+
 extern "C" FFmpegVRamDecoder *ffmpeg_vram_new_decoder(void *device,
                                                       int64_t luid,
                                                       DataFormat dataFormat) {

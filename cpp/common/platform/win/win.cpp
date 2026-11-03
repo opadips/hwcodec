@@ -1,4 +1,5 @@
 #include <array>
+#include <cstring>
 #include <atomic>
 #include <cstdio>
 #include <list>
@@ -165,6 +166,32 @@ bool NativeDevice::Nv12ToBgra(int width, int height,
   return true;
 }
 
+bool NativeDevice::SetNv12Color(int matrix, bool full_range) {
+  // Kr/Kb-derived coefficients: R = Y + a*Cr, G = Y - b*Cb - c*Cr, B = Y + d*Cb.
+  float a, b, c, d;
+  switch (matrix) {
+  case 1: // BT.709
+    a = 1.5748f; b = 0.187324f; c = 0.468124f; d = 1.8556f;
+    break;
+  case 2: // BT.2020 non-constant luminance
+    a = 1.4746f; b = 0.164553f; c = 0.571353f; d = 1.8814f;
+    break;
+  default: // BT.601
+    a = 1.402f; b = 0.344136f; c = 0.714136f; d = 1.772f;
+    break;
+  }
+  // Limited range: luma 16..235, chroma 16..240 of 255.
+  const float range[4] = {full_range ? 0.0f : 16.0f / 255.0f,
+                          full_range ? 1.0f : 255.0f / 219.0f,
+                          full_range ? 1.0f : 255.0f / 224.0f, 0.0f};
+  const float coeffs[4] = {a, b, c, d};
+  memcpy(color_, range, sizeof(range));
+  memcpy(color_ + 4, coeffs, sizeof(coeffs));
+  if (colorCB_)
+    context_->UpdateSubresource(colorCB_.Get(), 0, nullptr, color_, 0, 0);
+  return true;
+}
+
 bool NativeDevice::nv12_to_bgra_set_srv(ID3D11Texture2D *nv12Texture, int width,
                                         int height) {
   SRV_[0].Reset();
@@ -255,11 +282,11 @@ bool NativeDevice::nv12_to_bgra_set_shader() {
   pixelShader_.Reset();
 
 // https://gist.github.com/RomiTT/9c05d36fe339b899793a3252297a5624
-#include "pixel_shader_601.h"
+#include "pixel_shader_nv12.h"
 #include "vertex_shader.h"
   device_->CreateVertexShader(g_VS, ARRAYSIZE(g_VS), nullptr,
                               vertexShader_.ReleaseAndGetAddressOf());
-  device_->CreatePixelShader(g_PS, ARRAYSIZE(g_PS), nullptr,
+  device_->CreatePixelShader(g_PS_NV12, ARRAYSIZE(g_PS_NV12), nullptr,
                              pixelShader_.ReleaseAndGetAddressOf());
 
   // set InputLayout
@@ -276,6 +303,16 @@ bool NativeDevice::nv12_to_bgra_set_shader() {
 
   context_->VSSetShader(vertexShader_.Get(), NULL, 0);
   context_->PSSetShader(pixelShader_.Get(), NULL, 0);
+
+  // The colour constants (see SetNv12Color).
+  D3D11_BUFFER_DESC cbDesc = {};
+  cbDesc.ByteWidth = sizeof(color_);
+  cbDesc.Usage = D3D11_USAGE_DEFAULT;
+  cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+  D3D11_SUBRESOURCE_DATA cbData = {};
+  cbData.pSysMem = color_;
+  HRB(device_->CreateBuffer(&cbDesc, &cbData, colorCB_.ReleaseAndGetAddressOf()));
+  context_->PSSetConstantBuffers(0, 1, colorCB_.GetAddressOf());
 
   return true;
 }

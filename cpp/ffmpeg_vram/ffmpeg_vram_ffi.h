@@ -9,6 +9,11 @@ void *ffmpeg_vram_new_decoder(void *device, int64_t luid,
 int ffmpeg_vram_decode(void *decoder, uint8_t *data, int len,
                        DecodeCallback callback, void *obj);
 int ffmpeg_vram_destroy_decoder(void *decoder);
+// matrix: 0 BT.601, 1 BT.709, 2 BT.2020. Returns 0 on success.
+int ffmpeg_vram_decode_set_color(void *decoder, int32_t matrix, int32_t full_range);
+// 1 if the adapter with this LUID decodes dataFormat in hardware (D3D11VA,
+// not hybrid), 0 if not or on error. Checks capability only; decodes nothing.
+int ffmpeg_vram_decode_supported(int64_t luid, int32_t dataFormat);
 int ffmpeg_vram_test_decode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum,
                             int32_t *outDescNum,
                             int32_t dataFormat, uint8_t *data, int32_t length,
