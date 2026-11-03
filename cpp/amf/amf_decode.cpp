@@ -361,6 +361,8 @@ int amf_destroy_decoder(void *decoder) {
     }
   } catch (const std::exception &e) {
           LOG_ERROR(std::string("destroy failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }
@@ -386,6 +388,8 @@ void *amf_new_decoder(void *device, int64_t luid,
     }
   } catch (const std::exception &e) {
           LOG_ERROR(std::string("new failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   if (dec) {
     dec->destroy();
@@ -404,6 +408,8 @@ int amf_decode(void *decoder, uint8_t *data, int32_t length,
     }
   } catch (const std::exception &e) {
           LOG_ERROR(std::string("decode failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return HWCODEC_ERR_COMMON;
 }
@@ -444,6 +450,8 @@ int amf_test_decode(int64_t *outLuids, int32_t *outVendors, int32_t maxDescNum,
     return 0;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("test failed: ") + e.what());
+  } catch (...) {
+    LOG_ERROR("unknown exception");
   }
   return -1;
 }

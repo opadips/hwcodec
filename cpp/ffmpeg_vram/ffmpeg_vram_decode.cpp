@@ -202,10 +202,13 @@ private:
       locked = true;
       if (!convert(frame_, callback, obj)) {
         LOG_ERROR(std::string("Failed to convert"));
+        decoded = false;
         goto _exit;
       }
       if (callback)
         callback(native_->GetCurrentTexture(), obj);
+      unlockContext(this);
+      locked = false;
       decoded = true;
     }
   _exit:
@@ -235,7 +238,6 @@ private:
     }
     native_->next(); // comment out to remove picture shaking
 #ifdef USE_SHADER
-    native_->BeginQuery();
     if (!native_->Nv12ToBgra(frame->width, frame->height, texture,
                              native_->GetCurrentTexture(),
                              (int)frame->data[1])) {
@@ -244,11 +246,12 @@ private:
       return false;
     }
     native_->EndQuery();
-    native_->Query();
+    if (!native_->Query()) {
+      LOG_ERROR(std::string("Failed to query"));
+      return false;
+    }
 
 #else
-    native_->BeginQuery();
-
     // nv12 -> bgra
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC contentDesc;
     ZeroMemory(&contentDesc, sizeof(contentDesc));
@@ -311,6 +314,8 @@ extern "C" int ffmpeg_vram_destroy_decoder(FFmpegVRamDecoder *decoder) {
     return 0;
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("ffmpeg_ram_free_decoder exception:") + e.what());
+  } catch (...) {
+    LOG_ERROR("ffmpeg_vram_destroy_decoder: unknown exception");
   }
   return -1;
 }
@@ -328,6 +333,8 @@ extern "C" FFmpegVRamDecoder *ffmpeg_vram_new_decoder(void *device,
     }
   } catch (std::exception &e) {
     LOG_ERROR(std::string("new decoder exception:") + e.what());
+  } catch (...) {
+    LOG_ERROR("ffmpeg_vram_new_decoder: unknown exception");
   }
   if (decoder) {
     decoder->destroy();
@@ -349,6 +356,8 @@ extern "C" int ffmpeg_vram_decode(FFmpegVRamDecoder *decoder,
     }
   } catch (const std::exception &e) {
     LOG_ERROR(std::string("ffmpeg_ram_decode exception:") + e.what());
+  } catch (...) {
+    LOG_ERROR("ffmpeg_vram_decode: unknown exception");
   }
   return HWCODEC_ERR_COMMON;
 }
@@ -404,7 +413,13 @@ extern "C" int ffmpeg_vram_test_decode(int64_t *outLuids, int32_t *outVendors,
     *outDescNum = count;
     return 0;
   } catch (const std::exception &e) {
-    std::cerr << e.what() << '\n';
+    try {
+      std::cerr << e.what() << '\n';
+    } catch (...) {
+      // Logging must not let another exception escape the FFI boundary.
+    }
+  } catch (...) {
+    LOG_ERROR("ffmpeg_vram_test_decode: unknown exception");
   }
   return -1;
 }

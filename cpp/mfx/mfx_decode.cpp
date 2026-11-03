@@ -366,7 +366,6 @@ private:
     }
     native_->next(); // comment out to remove picture shaking
 #ifdef USE_SHADER
-    native_->BeginQuery();
     if (!native_->Nv12ToBgra(pmfxOutSurface->Info.CropW,
                              pmfxOutSurface->Info.CropH, texture,
                              native_->GetCurrentTexture(), 0)) {
@@ -377,7 +376,6 @@ private:
     native_->EndQuery();
     native_->Query();
 #else
-    native_->BeginQuery();
 
     // nv12 -> bgra
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC contentDesc;
