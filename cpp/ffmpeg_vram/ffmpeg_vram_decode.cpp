@@ -59,6 +59,11 @@ public:
     case H265:
       name_ = "hevc";
       break;
+    case AV1:
+      // FFmpeg's native av1 decoder, which decodes only through a hwaccel
+      // -- D3D11VA here.
+      name_ = "av1";
+      break;
     default:
       LOG_ERROR(std::string("unsupported data format"));
       break;

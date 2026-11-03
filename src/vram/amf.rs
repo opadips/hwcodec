@@ -35,7 +35,7 @@ pub fn possible_support_encoders() -> Vec<InnerEncodeContext> {
     if unsafe { amf_driver_support() } != 0 {
         return vec![];
     }
-    let codecs = vec![H264, H265];
+    let codecs = vec![H264, H265, AV1];
 
     let mut v = vec![];
     for codec in codecs.iter() {

@@ -149,6 +149,10 @@ public:
         surface->SetProperty(AMF_VIDEO_ENCODER_HEVC_FORCE_PICTURE_TYPE,
                              AMF_VIDEO_ENCODER_HEVC_PICTURE_TYPE_IDR);
         surface->SetProperty(AMF_VIDEO_ENCODER_HEVC_INSERT_HEADER, true);
+      } else if (AMFVideoEncoder_AV1 == codec_) {
+        surface->SetProperty(AMF_VIDEO_ENCODER_AV1_FORCE_FRAME_TYPE,
+                             AMF_VIDEO_ENCODER_AV1_FORCE_FRAME_TYPE_KEY);
+        surface->SetProperty(AMF_VIDEO_ENCODER_AV1_FORCE_INSERT_SEQUENCE_HEADER, true);
       }
     }
     res = AMFEncoder_->SubmitInput(surface);
@@ -502,6 +506,69 @@ private:
           (amf_int64)vbv_bits(bitRateIn_, frameRate_));
       AMF_CHECK_RETURN(
           res, "SetProperty AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE failed");
+    } else if (codecStr == amf_wstring(AMFVideoEncoder_AV1)) {
+      // ------------- Encoder params usage---------------
+      res = AMFEncoder_->SetProperty(
+          AMF_VIDEO_ENCODER_AV1_USAGE,
+          AMF_VIDEO_ENCODER_AV1_USAGE_LOW_LATENCY_HIGH_QUALITY);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_USAGE failed");
+
+      // ------------- Encoder params static---------------
+      res = AMFEncoder_->SetProperty(
+          AMF_VIDEO_ENCODER_AV1_FRAMESIZE,
+          ::AMFConstructSize(resolution_.first, resolution_.second));
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_FRAMESIZE failed");
+      // Any picture size, not only 64x16 multiples (1080 is not one).
+      // Not every generation takes it; one that does not keeps its own.
+      AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_ALIGNMENT_MODE,
+                               AMF_VIDEO_ENCODER_AV1_ALIGNMENT_MODE_NO_RESTRICTIONS);
+      AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_ENCODING_LATENCY_MODE,
+                               AMF_VIDEO_ENCODER_AV1_ENCODING_LATENCY_MODE_LOWEST_LATENCY);
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET,
+                                     AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET_QUALITY);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET failed");
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_COLOR_BIT_DEPTH, eDepth_);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_COLOR_BIT_DEPTH failed");
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD,
+                                     AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD failed");
+      // A sequence header with every key frame: a viewer that lost sync
+      // recovers from the keyframe alone.
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_HEADER_INSERTION_MODE,
+                                     AMF_VIDEO_ENCODER_AV1_HEADER_INSERTION_MODE_KEY_FRAME_ALIGNED);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_HEADER_INSERTION_MODE failed");
+      // color
+      res = AMFEncoder_->SetProperty<amf_int64>(
+          AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PROFILE,
+          bt709_ ? (full_range_ ? AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_709
+                                : AMF_VIDEO_CONVERTER_COLOR_PROFILE_709)
+                 : (full_range_ ? AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_601
+                                : AMF_VIDEO_CONVERTER_COLOR_PROFILE_601));
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PROFILE failed");
+      res = AMFEncoder_->SetProperty<amf_int64>(
+          AMF_VIDEO_ENCODER_AV1_OUTPUT_TRANSFER_CHARACTERISTIC,
+          bt709_ ? AMF_COLOR_TRANSFER_CHARACTERISTIC_BT709
+                 : AMF_COLOR_TRANSFER_CHARACTERISTIC_SMPTE170M);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_OUTPUT_TRANSFER_CHARACTERISTIC failed");
+      res = AMFEncoder_->SetProperty<amf_int64>(
+          AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PRIMARIES,
+          bt709_ ? AMF_COLOR_PRIMARIES_BT709 : AMF_COLOR_PRIMARIES_SMPTE170M);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PRIMARIES failed");
+
+      // ------------- Encoder params dynamic ---------------
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_QUERY_TIMEOUT,
+                                     query_timeout_); // ms
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_QUERY_TIMEOUT failed");
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE, bitRateIn_);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE failed");
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMERATE,
+                                     ::AMFConstructRate(frameRate_, 1));
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_FRAMERATE failed");
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_GOP_SIZE, gop_);
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_GOP_SIZE failed");
+      res = AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE,
+                                     (amf_int64)vbv_bits(bitRateIn_, frameRate_));
+      AMF_CHECK_RETURN(res, "SetProperty AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE failed");
     } else {
       return AMF_FAIL;
     }
@@ -520,6 +587,10 @@ private:
       packet->keyframe =
           AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE_IDR == pktType ||
           AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE_I == pktType;
+    } else if (AMFVideoEncoder_AV1 == codec_) {
+      uint64_t frameType;
+      pData->GetProperty(AMF_VIDEO_ENCODER_AV1_OUTPUT_FRAME_TYPE, &frameType);
+      packet->keyframe = AMF_VIDEO_ENCODER_AV1_OUTPUT_FRAME_TYPE_KEY == frameType;
     }
   }
 };
@@ -531,6 +602,9 @@ bool convert_codec(DataFormat lhs, amf_wstring &rhs) {
     break;
   case H265:
     rhs = AMFVideoEncoder_HEVC;
+    break;
+  case AV1:
+    rhs = AMFVideoEncoder_AV1;
     break;
   default:
     LOG_ERROR(std::string("unsupported codec: ") + std::to_string((int)lhs));
@@ -692,6 +766,15 @@ int amf_set_bitrate(void *encoder, int32_t kbs) {
         res = enc->AMFEncoder_->SetProperty(
             AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, vbv);
       break;
+    case AV1:
+      res = enc->AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE,
+                                          kbs * 1000);
+      if (res == AMF_OK)
+        res = enc->AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE,
+                                            vbv);
+      break;
+    default:
+      break;
     }
     if (res == AMF_OK)
       enc->bitRateIn_ = kbs * 1000;
@@ -717,6 +800,11 @@ int amf_set_framerate(void *encoder, int32_t framerate) {
     case H265:
       res =
           enc->AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMERATE, rate);
+      break;
+    case AV1:
+      res = enc->AMFEncoder_->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMERATE, rate);
+      break;
+    default:
       break;
     }
     return res == AMF_OK ? 0 : -1;
