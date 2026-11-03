@@ -186,7 +186,6 @@ public:
     bool decoded = false;
     for (int i = 0; i < nFrameReturned; i++) {
       uint8_t *pFrame = dec_->GetFrame();
-      native_->BeginQuery();
       if (!copy_cuda_frame(pFrame)) {
         LOG_ERROR(std::string("copy_cuda_frame failed"));
         native_->EndQuery();
