@@ -105,6 +105,9 @@ public:
     case H265:
       guidCodec = NV_ENC_CODEC_HEVC_GUID;
       break;
+    case AV1:
+      guidCodec = NV_ENC_CODEC_AV1_GUID;
+      break;
     default:
       LOG_ERROR(std::string("dataFormat not support, dataFormat: ") +
                 std::to_string(dataFormat_));
@@ -169,6 +172,8 @@ public:
     // color
     if (dataFormat_ == H264) {
       setup_h264(initializeParams.encodeConfig);
+    } else if (dataFormat_ == AV1) {
+      setup_av1(initializeParams.encodeConfig);
     } else {
       setup_hevc(initializeParams.encodeConfig);
     }
@@ -331,6 +336,30 @@ public:
     hevc->tier = NV_ENC_TIER_HEVC_MAIN;
 
     encodeConfig->profileGUID = NV_ENC_HEVC_PROFILE_MAIN_GUID;
+  }
+
+  void setup_av1(NV_ENC_CONFIG *encodeConfig) {
+    NV_ENC_CONFIG_AV1 *av1 = &encodeConfig->encodeCodecConfig.av1Config;
+    av1->colorRange = full_range_ ? 1 : 0;
+    av1->matrixCoefficients = bt709_ ? NV_ENC_VUI_MATRIX_COEFFS_BT709 : NV_ENC_VUI_MATRIX_COEFFS_SMPTE170M;
+    av1->colorPrimaries = bt709_ ? NV_ENC_VUI_COLOR_PRIMARIES_BT709 : NV_ENC_VUI_COLOR_PRIMARIES_SMPTE170M;
+    av1->transferCharacteristics =
+        bt709_ ? NV_ENC_VUI_TRANSFER_CHARACTERISTIC_BT709 : NV_ENC_VUI_TRANSFER_CHARACTERISTIC_SMPTE170M;
+    // A sequence header on every key frame, as repeatSPSPPS does for
+    // H.264/H.265: a viewer that lost sync recovers from the keyframe
+    // alone. Low-overhead OBUs (Section 5), what FFmpeg's av1 parser and
+    // decoder take, not Annex B.
+    av1->repeatSeqHdr = 1;
+    av1->outputAnnexBFormat = 0;
+    // See setup_h264: the key frame interval follows the GOP.
+    av1->idrPeriod = encodeConfig->gopLength;
+    av1->chromaFormatIDC = 1;
+    av1->inputPixelBitDepthMinus8 = 0;
+    av1->pixelBitDepthMinus8 = 0;
+    av1->level = NV_ENC_LEVEL_AV1_AUTOSELECT;
+    av1->tier = NV_ENC_TIER_AV1_0;
+
+    encodeConfig->profileGUID = NV_ENC_AV1_PROFILE_MAIN_GUID;
   }
 
 private:

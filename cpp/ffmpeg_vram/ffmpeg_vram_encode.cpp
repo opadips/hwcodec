@@ -327,6 +327,8 @@ private:
         name = "h264_nvenc";
       } else if (dataFormat_ == H265) {
         name = "hevc_nvenc";
+      } else if (dataFormat_ == AV1) {
+        name = "av1_nvenc";
       } else {
         LOG_ERROR(std::string("Unsupported data format: ") + std::to_string(dataFormat_));
         return false;
@@ -341,6 +343,8 @@ private:
         name = "h264_amf";
       } else if (dataFormat_ == H265) {
         name = "hevc_amf";
+      } else if (dataFormat_ == AV1) {
+        name = "av1_amf";
       } else {
         LOG_ERROR(std::string("Unsupported data format: ") + std::to_string(dataFormat_));
         return false;

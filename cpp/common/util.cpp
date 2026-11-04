@@ -77,6 +77,8 @@ void set_av_codec_ctx(AVCodecContext *c, const std::string &name, int kbs,
 #else
     c->profile = FF_PROFILE_HEVC_MAIN;
 #endif
+  } else if (name.find("av1") != std::string::npos) {
+    c->profile = AV_PROFILE_AV1_MAIN;
   }
 }
 

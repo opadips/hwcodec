@@ -44,6 +44,9 @@ public:
                   DXGI_COLOR_SPACE_TYPE colorSpace_outt);
   bool Nv12ToBgra(int width, int height, ID3D11Texture2D *nv12Texture,
                   ID3D11Texture2D *bgraTexture, int nv12ArrayIndex);
+  // The colour matrix (0 BT.601, 1 BT.709, 2 BT.2020) and range Nv12ToBgra
+  // converts with. BT.601 limited range until set.
+  bool SetNv12Color(int matrix, bool full_range);
   AdapterVendor GetVendor();
   bool support_decode(DataFormat format);
 
@@ -88,6 +91,8 @@ public:
   ComPtr<ID3D11PixelShader> pixelShader_ = NULL;
   ComPtr<ID3D11SamplerState> samplerLinear_ = NULL;
   ComPtr<ID3D11Texture2D> nv12SrvTexture_ = nullptr;
+  ComPtr<ID3D11Buffer> colorCB_ = nullptr;
+  float color_[8] = {0.0627451f, 1.164384f, 1.138393f, 0.0f, 1.402f, 0.344136f, 0.714136f, 1.772f};
 
   int count_;
   int index_ = 0;

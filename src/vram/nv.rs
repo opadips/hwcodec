@@ -34,7 +34,7 @@ pub fn possible_support_encoders() -> Vec<InnerEncodeContext> {
     if unsafe { nv_encode_driver_support() } != 0 {
         return vec![];
     }
-    let dataFormats = vec![H264, H265];
+    let dataFormats = vec![H264, H265, AV1];
     let mut v = vec![];
     for dataFormat in dataFormats.iter() {
         v.push(InnerEncodeContext {

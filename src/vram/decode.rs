@@ -76,6 +76,22 @@ impl Decoder {
         }
     }
 
+    /// The colour matrix (0 BT.601, 1 BT.709, 2 BT.2020) and range the
+    /// NV12 -> BGRA conversion uses. Only the FFmpeg backend supports it.
+    pub fn set_color(&mut self, matrix: i32, full_range: bool) -> Result<(), i32> {
+        if self.ctx.driver != FFMPEG {
+            return Err(-1);
+        }
+        let ret = unsafe {
+            ffmpeg::ffmpeg_vram_decode_set_color(self.codec, matrix, full_range as i32)
+        };
+        if ret == 0 {
+            Ok(())
+        } else {
+            Err(ret)
+        }
+    }
+
     unsafe extern "C" fn callback(texture: *mut c_void, obj: *const c_void) {
         let frames = &mut *(obj as *mut Vec<DecodeFrame>);
         let mut width = 0;
@@ -237,4 +253,12 @@ pub fn available() -> Vec<DecodeContext> {
     }
 
     outputs
+}
+
+/// Whether the adapter with `luid` decodes `data_format` in hardware
+/// through D3D11VA (the FFmpeg backend). A capability check only: unlike
+/// `available()` it decodes nothing, so it is cheap enough to call before
+/// every session.
+pub fn supported(luid: i64, data_format: crate::common::DataFormat) -> bool {
+    unsafe { ffmpeg::ffmpeg_vram_decode_supported(luid, data_format as i32) == 1 }
 }

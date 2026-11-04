@@ -31,7 +31,7 @@ pub fn decode_calls() -> DecodeCalls {
 }
 
 pub fn possible_support_encoders() -> Vec<InnerEncodeContext> {
-    let dataFormats = vec![H264, H265];
+    let dataFormats = vec![H264, H265, AV1];
     let mut v = vec![];
     for dataFormat in dataFormats.iter() {
         v.push(InnerEncodeContext {

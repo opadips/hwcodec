@@ -28,6 +28,7 @@ public:
   int64_t start_ms;
   int64_t last_pts;
   int got_first;
+  int header_written = 0;
 
   Muxer() {}
 
@@ -41,7 +42,8 @@ public:
       avformat_free_context(oc);
   }
 
-  bool init(const char *filename, int width, int height, int is265,
+  // codec is a DataFormat: 0 H.264, 1 H.265, 4 AV1.
+  bool init(const char *filename, int width, int height, int codec,
             int framerate) {
     OutputStream *ost = &video_st;
     ost->st = NULL;
@@ -60,7 +62,20 @@ public:
       return false;
     }
     ost->st->id = oc->nb_streams - 1;
-    ost->st->codecpar->codec_id = is265 ? AV_CODEC_ID_H265 : AV_CODEC_ID_H264;
+    switch (codec) {
+    case 0:
+      ost->st->codecpar->codec_id = AV_CODEC_ID_H264;
+      break;
+    case 1:
+      ost->st->codecpar->codec_id = AV_CODEC_ID_H265;
+      break;
+    case 4:
+      ost->st->codecpar->codec_id = AV_CODEC_ID_AV1;
+      break;
+    default:
+      LOG_ERROR(std::string("unsupported codec ") + std::to_string(codec));
+      return false;
+    }
     ost->st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
     ost->st->codecpar->width = width;
     ost->st->codecpar->height = height;
@@ -79,12 +94,24 @@ public:
       return false;
     }
 
-    ret = avformat_write_header(oc, NULL);
-    if (ret < 0) {
-      LOG_ERROR(std::string("avformat_write_header failed"));
-      return false;
+    if (strcmp(oc->oformat->name, "mp4") == 0) {
+      // Keep incomplete recordings recoverable (2 s fragments, flushed as
+      // they are cut) and finalize normal recordings as ordinary MP4 for
+      // player compatibility.
+      if ((ret = av_opt_set(oc->priv_data, "movflags",
+                            "frag_keyframe+hybrid_fragmented", 0)) < 0 ||
+          (ret = av_opt_set_int(oc->priv_data, "frag_duration", 2000000, 0)) < 0) {
+        LOG_WARN(std::string("Failed to configure MP4 fragments, ret = ") +
+                 std::to_string(ret));
+        av_opt_set_defaults(oc->priv_data);
+      } else {
+        oc->flags |= AVFMT_FLAG_FLUSH_PACKETS;
+      }
     }
 
+    // The header is written with the first key frame (write_video_frame):
+    // AV1's av1C box is built from codec extradata, which only that
+    // frame's sequence header can supply.
     this->framerate = framerate;
     this->start_ms = 0;
     this->last_pts = 0;
@@ -105,6 +132,22 @@ public:
       if (key != 1)
         return -2;
       start_ms = pts_ms;
+    }
+    if (!header_written) {
+      AVCodecParameters *par = ost->st->codecpar;
+      if (par->codec_id == AV_CODEC_ID_AV1 && !par->extradata) {
+        // ff_isom_write_av1c parses the OBUs for the sequence header.
+        par->extradata = (uint8_t *)av_mallocz(len + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (!par->extradata)
+          return -1;
+        memcpy(par->extradata, data, len);
+        par->extradata_size = len;
+      }
+      if ((ret = avformat_write_header(fmt_ctx, NULL)) < 0) {
+        LOG_ERROR(std::string("avformat_write_header failed, ret = ") + std::to_string(ret));
+        return -1;
+      }
+      header_written = 1;
     }
     int64_t pts = (pts_ms - start_ms); // use write timestamp
     if (pts <= last_pts && got_first) {
@@ -141,12 +184,12 @@ public:
 } // namespace
 
 extern "C" Muxer *hwcodec_new_muxer(const char *filename, int width, int height,
-                                    int is265, int framerate) {
+                                    int codec, int framerate) {
   Muxer *muxer = NULL;
   try {
     muxer = new Muxer();
     if (muxer) {
-      if (muxer->init(filename, width, height, is265, framerate)) {
+      if (muxer->init(filename, width, height, codec, framerate)) {
         return muxer;
       }
     }
@@ -176,7 +219,19 @@ extern "C" int hwcodec_write_video_frame(Muxer *muxer, const uint8_t *data,
 }
 
 extern "C" int hwcodec_write_tail(Muxer *muxer) {
-  return av_write_trailer(muxer->oc);
+  try {
+    if (!muxer || !muxer->oc)
+      return -1;
+    // Nothing was ever written: no header, so no trailer to write.
+    if (!muxer->header_written)
+      return 0;
+    return av_write_trailer(muxer->oc);
+  } catch (const std::exception &e) {
+    LOG_ERROR(std::string("write_tail exception: ") + std::string(e.what()));
+  } catch (...) {
+    LOG_ERROR("hwcodec_write_tail: unknown exception");
+  }
+  return -1;
 }
 
 extern "C" void hwcodec_free_muxer(Muxer *muxer) {
