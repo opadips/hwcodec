@@ -63,6 +63,10 @@ public:
   mfxExtCodingOption2 coding_option2_;
   mfxExtCodingOption3 coding_option3_;
   mfxExtVideoSignalInfo signal_info_;
+  // Tell the encoder its input is a desktop, and keep each frame near its
+  // share of the bitrate (see resetEncExtParams). Cleared for the rest of
+  // this encoder's life when the driver refuses the settings.
+  bool screen_tuning_ = true;
   ComPtr<ID3D11Texture2D> nv12Texture_ = nullptr;
 
 // vpp
@@ -377,6 +381,12 @@ private:
     //   the requested configuration
     sts = mfxENC_->Query(&mfxEncParams_, &mfxEncParams_);
     MSDK_IGNORE_MFX_STS(sts, MFX_WRN_INCOMPATIBLE_VIDEO_PARAM);
+    if (sts != MFX_ERR_NONE && screen_tuning_) {
+      LOG_WARN(std::string("Query refused the screen settings, sts=") + std::to_string((int)sts) +
+               "; using the plain ones");
+      screen_tuning_ = false;
+      return resetEnc();
+    }
     CHECK_STATUS(sts, "Query");
 
     mfxFrameAllocRequest EncRequest;
@@ -394,6 +404,14 @@ private:
 
     // Initialize the Media SDK encoder
     sts = mfxENC_->Init(&mfxEncParams_);
+    // A warning (a setting adjusted, partial acceleration) is a working
+    // encoder; only an error is not.
+    if (sts < MFX_ERR_NONE && screen_tuning_) {
+      LOG_WARN(std::string("Init refused the screen settings, sts=") + std::to_string((int)sts) +
+               "; using the plain ones");
+      screen_tuning_ = false;
+      return resetEnc();
+    }
     CHECK_STATUS(sts, "Init");
 
     // Retrieve video parameters selected by encoder.
@@ -538,6 +556,18 @@ private:
     memset(&coding_option3_, 0, sizeof(mfxExtCodingOption3));
     coding_option3_.Header.BufferId = MFX_EXTBUFF_CODING_OPTION3;
     coding_option3_.Header.BufferSz = sizeof(mfxExtCodingOption3);
+    if (screen_tuning_) {
+      // The input is a desktop, not camera video: the encoder tunes its
+      // mode decisions and rate control for flat areas, sharp edges and
+      // text. The profile stays Main (set in resetEnc), so no
+      // screen-content extension a viewer could not decode is switched on.
+      coding_option3_.ScenarioInfo = MFX_SCENARIO_DISPLAY_REMOTING;
+      coding_option3_.ContentInfo = MFX_CONTENT_NON_VIDEO_SCREEN;
+      // Rate control per frame rather than over a long window: a scene
+      // change costs a few larger frames, not one that holds up everything
+      // behind it on a slow link.
+      coding_option3_.LowDelayBRC = MFX_CODINGOPTION_ON;
+    }
     extbuffers_[2] = (mfxExtBuffer *)&coding_option3_;
     
     // signal info

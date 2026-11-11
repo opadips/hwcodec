@@ -178,7 +178,19 @@ public:
       setup_hevc(initializeParams.encodeConfig);
     }
 
-    pEnc_->CreateEncoder(&initializeParams);
+    // Spatial adaptive quantisation: within a frame's budget, more of the
+    // bits go to flat areas and the edges of text, where a desktop shows
+    // coding noise first. Strength 0 leaves the amount to the driver.
+    initializeParams.encodeConfig->rcParams.enableAQ = 1;
+    initializeParams.encodeConfig->rcParams.aqStrength = 0;
+    try {
+      pEnc_->CreateEncoder(&initializeParams);
+    } catch (const std::exception &e) {
+      LOG_WARN(std::string("create with adaptive quantisation failed (") + e.what() +
+               "); creating without it");
+      initializeParams.encodeConfig->rcParams.enableAQ = 0;
+      pEnc_->CreateEncoder(&initializeParams);
+    }
     return true;
   }
 
